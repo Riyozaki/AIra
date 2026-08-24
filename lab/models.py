@@ -101,14 +101,16 @@ class TinyLoopLM(nn.Module):
     def __init__(self, vocab: int, d: int = 128, n_head: int = 4, d_ff: int = 512,
                  max_len: int = 256, max_loops: int = 64, beta: float = 1.0,
                  depth_emb: bool = False, two_time: bool = False,
-                 slow_m: int = 8, use_slow: bool = True, state_ln: bool = False):
+                 slow_m: int = 8, use_slow: bool = True, state_ln: bool = False,
+                 slow_ln: bool = False):
         super().__init__()
         self.tok = nn.Embedding(vocab, d)
         self.pos = nn.Embedding(max_len, d)
         self.ln_out = nn.LayerNorm(d)
         self.ln_state = nn.LayerNorm(d, elementwise_affine=False) if state_ln else None
         if two_time:
-            self.core = TwoTimeCore(d, n_head, d_ff, m=slow_m, beta=beta, use_slow=use_slow)
+            self.core = TwoTimeCore(d, n_head, d_ff, m=slow_m, beta=beta,
+                                    use_slow=use_slow, slow_ln=slow_ln)
         else:
             self.core = SharedCore(d, n_head, d_ff, max_loops, beta=beta, depth_emb=depth_emb)
         self.two_time = two_time

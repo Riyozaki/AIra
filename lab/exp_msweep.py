@@ -26,12 +26,12 @@ VOCAB, D, NH, DFF, T = 24, 64, 4, 256, 96
 TAU = 10.0
 
 
-def build(m, use_slow=True, beta=1.0, seed=0, state_ln=False):
+def build(m, use_slow=True, beta=1.0, seed=0, state_ln=False, slow_ln=False):
     torch.manual_seed(seed)
     return TinyLoopLM(vocab=VOCAB, d=D, n_head=NH, d_ff=DFF, max_len=T,
                       max_loops=64, beta=beta, depth_emb=False,
                       two_time=True, slow_m=m, use_slow=use_slow,
-                      state_ln=state_ln)
+                      state_ln=state_ln, slow_ln=slow_ln)
 
 
 @torch.no_grad()
@@ -76,6 +76,8 @@ def main():
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--state_ln", action="store_true",
                     help="stabilized kernel: LN on state each iteration (TW-3 round 2)")
+    ap.add_argument("--slow_ln", action="store_true",
+                    help="stabilized slow loop: LN on slow state (TW-3 round 3)")
     ap.add_argument("--out", default="results/tweek/msweep_results.json")
     args = ap.parse_args()
     steps = 30 if args.smoke else args.steps
@@ -90,7 +92,8 @@ def main():
             ("m16", 16, True), ("noslow", 1, False)]
     for name, m, use_slow in grid:
         t0 = time.time()
-        model = build(m=m, use_slow=use_slow, state_ln=args.state_ln)
+        model = build(m=m, use_slow=use_slow, state_ln=args.state_ln,
+                      slow_ln=args.slow_ln)
         print(f"[train] {name} (m={m}, slow={use_slow}) "
               f"params={count_params(model)} steps={steps}", flush=True)
         train_model(model, src_train, steps=steps, B=12, T=T,
