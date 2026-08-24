@@ -1,0 +1,9 @@
+{
+  "results": {
+    "donor_patch": true,
+    "lambda": true,
+    "msweep": true,
+    "sudoku": true
+  },
+  "quick": true
+}

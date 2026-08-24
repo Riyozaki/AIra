@@ -1,0 +1,12 @@
+== donor_patch self-tests ==
+test_shapes_and_props OK | patch params: 37,121 | finite@64: True | d_norm: 0.0425 -> 0.024825 | lambda_hat (random weights, informative=None): 0.982
+test_shapes_and_props OK | patch params: 37,121 | finite@64: True | d_norm: 0.0385 -> 0.018821 | lambda_hat (random weights, informative=None): 0.971
+qwen2.5-0.5b reference: total 508.9M, loop patch 14.91M (2.93%)
+[donor_patch] HF index unreachable (URLError); running random-init shape/telemetry tests only.
+random-init mode only (sandbox): shape/geometry/loop-law tests all green
+== all green ==
+
+--- STDERR ---
+/home/user/AIra/lab/donor_patch.py:237: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:822.)
+  loop_on = float(self.beta) != 0.0

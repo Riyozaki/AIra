@@ -1,0 +1,90 @@
+{
+  "config": {
+    "vocab": 24,
+    "d": 64,
+    "T": 96,
+    "steps": 30,
+    "K_train": [
+      2,
+      10
+    ],
+    "K_eval": 64,
+    "tau": 10.0
+  },
+  "runs": {
+    "m1": {
+      "L_final": 6.9901429414749146,
+      "L_hard_final": 6.988961577415466,
+      "acc_hard_final": 0.04074770724400878,
+      "lam_slow_step": 0.888854518532753,
+      "train_sec": 5.718518257141113,
+      "n_params": 115712,
+      "m": 1,
+      "use_slow": true
+    },
+    "m2": {
+      "L_final": 7.050846815109253,
+      "L_hard_final": 7.087750554084778,
+      "acc_hard_final": 0.04828139906749129,
+      "lam_slow_step": 0.9349918514490128,
+      "train_sec": 3.5599255561828613,
+      "n_params": 115712,
+      "m": 2,
+      "use_slow": true
+    },
+    "m4": {
+      "L_final": 8.063443541526794,
+      "L_hard_final": 8.145723938941956,
+      "acc_hard_final": 0.02967682760208845,
+      "lam_slow_step": 0.9746132642030716,
+      "train_sec": 3.6410460472106934,
+      "n_params": 115712,
+      "m": 4,
+      "use_slow": true
+    },
+    "m8": {
+      "L_final": 5.832762718200684,
+      "L_hard_final": 5.98182737827301,
+      "acc_hard_final": 0.056113872211426497,
+      "lam_slow_step": 0.9795971661806107,
+      "train_sec": 3.975864887237549,
+      "n_params": 115712,
+      "m": 8,
+      "use_slow": true
+    },
+    "m16": {
+      "L_final": 5.593522906303406,
+      "L_hard_final": 5.443243980407715,
+      "acc_hard_final": 0.03391556767746806,
+      "lam_slow_step": NaN,
+      "train_sec": 4.032466173171997,
+      "n_params": 115712,
+      "m": 16,
+      "use_slow": true
+    },
+    "noslow": {
+      "L_final": 6.451401710510254,
+      "L_hard_final": 6.738609075546265,
+      "acc_hard_final": 0.035339439287781715,
+      "lam_slow_step": 0.0,
+      "train_sec": 3.4998722076416016,
+      "n_params": 115712,
+      "m": 1,
+      "use_slow": false
+    }
+  },
+  "derived": {
+    "lam_L": 0.888854518532753,
+    "argmin_run": "m16",
+    "m_empirical": 16,
+    "m_star_pred": 19.54296223274582,
+    "window": [
+      9.77148111637291,
+      39.08592446549164
+    ],
+    "TW3_pass": true,
+    "m1_loss": 6.9901429414749146,
+    "TW3b_pass": true,
+    "noslow_loss": 6.451401710510254
+  }
+}
