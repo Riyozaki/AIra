@@ -1,0 +1,14 @@
+{
+  "name": "parcae_functional_form_bakeoff",
+  "metric": "average Huber loss (x1e-7) of per-curve fits, lower=better",
+  "provenance": "arXiv:2604.12946, Appendix L, Table 12 (verbatim)",
+  "forms": {
+    "exp_decay_floor (ours, T1 form L=C*lam^k+floor)": {"in_dist_140M": 2.52, "in_dist_370M": 1.88, "extrap_140M": 3.18, "extrap_370M": 2.29},
+    "shifted_power_floor": {"in_dist_140M": 5.42, "in_dist_370M": 5.26, "extrap_140M": 21.41, "extrap_370M": 18.51},
+    "power_floor": {"in_dist_140M": 11.11, "in_dist_370M": 10.77, "extrap_140M": 43.99, "extrap_370M": 38.68},
+    "power_no_floor (Parcae-world pure)": {"in_dist_140M": 112.89, "in_dist_370M": 104.95, "extrap_140M": 397.90, "extrap_370M": 369.83}
+  },
+  "points": [],
+  "verbatim_quote": "the exponential decay form achieves the lowest Huber loss both in-distribution (2.3x better than the shifted power law) and under extrapolation (7.1x better)... omitting the irreducible floor increases error by over 40x",
+  "meaning": "External replication of TW-4 discriminator: geometric-decay-with-floor (our T1 functional form) beats pure power law on 140M and 370M looped LMs trained/owned by UCSD+Together. Our own-curve replication stays in G-phase."
+}

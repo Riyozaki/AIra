@@ -1,0 +1,21 @@
+{
+  "curves": {
+    "huginn_arc_c_vs_r": {
+      "status": "too_few_points",
+      "n": 2
+    },
+    "parcae_scaling_coefficients": {
+      "status": "too_few_points",
+      "n": 0
+    },
+    "parcae_functional_form_bakeoff": {
+      "status": "too_few_points",
+      "n": 0
+    },
+    "retrofit_rd_depth_and_halting": {
+      "status": "too_few_points",
+      "n": 0
+    }
+  },
+  "verdicts": {}
+}

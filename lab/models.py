@@ -64,7 +64,8 @@ class TwoTimeCore(nn.Module):
     """
 
     def __init__(self, d: int, n_head: int, d_ff: int, m: int = 8,
-                 beta: float = 1.0, beta_s: float = 1.0, use_slow: bool = True):
+                 beta: float = 1.0, beta_s: float = 1.0, use_slow: bool = True,
+                 slow_ln: bool = False):
         super().__init__()
         self.m = m
         self.beta = beta
@@ -73,6 +74,8 @@ class TwoTimeCore(nn.Module):
         self.fast = SharedCore(d, n_head, d_ff, max_loops=1, beta=1.0, depth_emb=False)
         self.ln_pool = nn.LayerNorm(d)
         self.slow = nn.Sequential(nn.Linear(2 * d, d_ff), nn.GELU(), nn.Linear(d_ff, d))
+        # R3 (TWEEK round 3): every recurrent loop must be bounded -- slow state too
+        self.ln_s = nn.LayerNorm(d, elementwise_affine=False) if slow_ln else None
         self.film = nn.Linear(d, 2 * d)
         nn.init.zeros_(self.film.weight)
         nn.init.zeros_(self.film.bias)
@@ -82,7 +85,10 @@ class TwoTimeCore(nn.Module):
             if k % self.m == 0:
                 pooled = self.ln_pool(h).mean(dim=1)  # [B, D]
                 s = state["s"]
-                state["s"] = s + self.beta_s * self.slow(torch.cat([s, pooled], dim=-1))
+                s = s + self.beta_s * self.slow(torch.cat([s, pooled], dim=-1))
+                if self.ln_s is not None:
+                    s = self.ln_s(s)
+                state["s"] = s
                 state["s_updates"] += 1
             g, b = self.film(state["s"]).unsqueeze(1).chunk(2, dim=-1)
             h = h * (1.0 + g) + b

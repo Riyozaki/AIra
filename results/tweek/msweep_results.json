@@ -1,0 +1,87 @@
+{
+  "config": {
+    "vocab": 24,
+    "d": 64,
+    "T": 96,
+    "steps": 1500,
+    "K_train": [
+      2,
+      10
+    ],
+    "K_eval": 64,
+    "tau": 10.0
+  },
+  "runs": {
+    "m1": {
+      "L_final": 9.17861294746399,
+      "L_hard_final": 9.530238389968872,
+      "acc_hard_final": 0.031223304104059935,
+      "lam_slow_step": 1.0346920788288116,
+      "train_sec": 110.31164503097534,
+      "n_params": 115712,
+      "m": 1,
+      "use_slow": true
+    },
+    "m2": {
+      "L_final": NaN,
+      "L_hard_final": NaN,
+      "acc_hard_final": 0.05196375027298927,
+      "lam_slow_step": NaN,
+      "train_sec": 107.36815905570984,
+      "n_params": 115712,
+      "m": 2,
+      "use_slow": true
+    },
+    "m4": {
+      "L_final": 11.86155652999878,
+      "L_hard_final": 12.853965997695923,
+      "acc_hard_final": 0.05772662442177534,
+      "lam_slow_step": 1.0502952933311462,
+      "train_sec": 107.9702615737915,
+      "n_params": 115712,
+      "m": 4,
+      "use_slow": true
+    },
+    "m8": {
+      "L_final": 9.718409776687622,
+      "L_hard_final": 9.687760353088379,
+      "acc_hard_final": 0.06067005079239607,
+      "lam_slow_step": 1.0343161523342133,
+      "train_sec": 103.604820728302,
+      "n_params": 115712,
+      "m": 8,
+      "use_slow": true
+    },
+    "m16": {
+      "L_final": 12.683817386627197,
+      "L_hard_final": 12.934791088104248,
+      "acc_hard_final": 0.03679692419245839,
+      "lam_slow_step": NaN,
+      "train_sec": 111.47541046142578,
+      "n_params": 115712,
+      "m": 16,
+      "use_slow": true
+    },
+    "noslow": {
+      "L_final": 4.481881737709045,
+      "L_hard_final": 6.056312680244446,
+      "acc_hard_final": 0.09441161900758743,
+      "lam_slow_step": 0.0,
+      "train_sec": 96.6389832496643,
+      "n_params": 115712,
+      "m": 1,
+      "use_slow": false
+    }
+  },
+  "derived": {
+    "lam_L": 1.0346920788288116,
+    "argmin_run": "m1",
+    "m_empirical": 1,
+    "m_star_pred": null,
+    "TW3_pass": false,
+    "note": "slow map does not contract (lam_L>=1) or missing: T4 premise failed",
+    "m1_loss": 9.17861294746399,
+    "TW3b_pass": false,
+    "noslow_loss": 4.481881737709045
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "huginn_arc_c_vs_r",
+  "metric": "ARC-C accuracy (800B checkpoint)",
+  "provenance": "arXiv:2502.05171, Table 4 (verbatim). Model card: quality improves up to ~64 recurrences.",
+  "points": [
+    {"r": 1, "value": 24.06},
+    {"r": 32, "value": 38.23}
+  ],
+  "note": "Only r=1 and r=32 numbers are published in text; the full per-r curve is Figure 7 (not textual). Two points cannot discriminate functional forms -- TW-4 deferred to own curves (G-phase)."
+}

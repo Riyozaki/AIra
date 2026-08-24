@@ -1,0 +1,13 @@
+{
+  "name": "parcae_scaling_coefficients",
+  "metric": "fitted coefficients of L_train(mu_rec, D) = E + A*N(mu_rec)^-a + B*D^-b",
+  "provenance": "arXiv:2604.12946, Appendix K, Table 11 (verbatim); gamma from Appendix L text",
+  "fits": {
+    "140M": {"E": 2.662, "A": 522733.307, "a": 0.771, "B": 25420.102, "b": 0.525, "huber_x1e4": 0.44, "gamma": 1.19},
+    "370M": {"E": 2.439, "A": 832134.346, "a": 0.775, "B": 6386.865, "b": 0.448, "huber_x1e4": 0.01, "gamma": 1.17}
+  },
+  "unified_law": "L(T | mu_rec, D) = train_floor(mu_rec, D) + Z*exp(-z*T/mu_rec); adopt gamma=1; OOD prediction error 0.85-1.31%",
+  "floor_recovery": "fitted L_inf matches empirical L(T=mu_rec) to 0.05-0.16% mean error (Table 13)",
+  "points": [],
+  "use_for_T2": "anchor for our N x D x K law exponents (a~0.77 on effective-params axis, b~0.45-0.53 on data) and the mu_rec^-1 decay-rate scaling: lambda_T = exp(-z/mu_rec)"
+}

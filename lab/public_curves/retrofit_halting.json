@@ -1,0 +1,15 @@
+{
+  "name": "retrofit_rd_depth_and_halting",
+  "metric": "accuracy / counts (verbatim)",
+  "provenance": "arXiv:2608.11233 (Qwen2.5-0.5B recurrent retrofit), Sections 10/12 (verbatim)",
+  "depth_profile_relay": [{"depth": 10, "acc": 82.8}, {"depth": 11, "acc": 57.0}, {"depth": 12, "acc": 32.0}],
+  "depth_profile_pointer": [{"depth": 9, "acc": 77.3}, {"depth": 10, "acc": 55.5}, {"depth": 11, "acc": 44.5}, {"depth": 12, "acc": 19.5}],
+  "halting_negative": {
+    "forced_depth_accuracy": "759/768 (98.83%) on frozen N24 mechanism",
+    "supervised_halting_head": "70/768 (9.11%)",
+    "pondernet_unsupervised": "64/768 collapsed to always-max depth, Spearman=0.0",
+    "quote": "Learned depth selection remains an open problem for future investigation"
+  },
+  "points": [],
+  "meaning": "Direct external evidence for TO-3 (critic/depth-selection risk): outcome-weighted halting objectives collapse; supervised depth head fails when depth is content-independent. Our T3 critic must bring per-token information path, not head-on-pooled-state."
+}
