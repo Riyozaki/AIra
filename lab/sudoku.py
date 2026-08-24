@@ -79,6 +79,50 @@ class SudokuConfig:
         bt(cands)
         return count
 
+    def wave_assignments(self, grid):
+        """Per-cell wave index w_c: when each blank cell becomes forced (0 = given clue).
+
+        Returns int8[S] with w_c for every cell (0=given), or None if not propagation-solvable.
+        Used by wave-supervision (B3, Retrofit-style intermediate labels, G0S S-9).
+        """
+        solved = {}
+        clues = {i: int(v) for i, v in enumerate(grid) if v != 0}
+        waves = np.zeros(self.S, dtype=np.int8)
+        w = 0
+        while True:
+            cands = []
+            for i in range(self.S):
+                if i in solved or i in clues:
+                    cands.append({clues.get(i, solved.get(i, 0))})
+                    continue
+                c = set(range(1, self.N + 1))
+                for p in self.peers[i]:
+                    if p in clues:
+                        c.discard(clues[p])
+                    elif p in solved:
+                        c.discard(solved[p])
+                if not c:
+                    return None
+                cands.append(c)
+            if len(solved) + len(clues) == self.S:
+                return waves
+            new = {}
+            for i in range(self.S):
+                if i not in solved and i not in clues and len(cands[i]) == 1:
+                    new[i] = next(iter(cands[i]))
+            for u in self.units:
+                for v in range(1, self.N + 1):
+                    places = [i for i in u
+                              if i not in solved and i not in clues and v in cands[i]]
+                    if len(places) == 1:
+                        new.setdefault(places[0], v)
+            if not new:
+                return None
+            w += 1
+            for i in new:
+                waves[i] = w
+            solved.update(new)
+
     def propagation_depth(self, grid):
         """Synchronous waves to solve, None if guessing required."""
         solved = {}

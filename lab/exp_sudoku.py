@@ -29,7 +29,15 @@ TRAIN_POOL = "results/g0s/pool_train9.npz"
 VAL_POOL = "results/g0s/pool_val9.npz"
 
 
-def get_pools(n_train=1400, n_val=400):
+def augment_waves(pool):
+    """Attach per-cell wave index (w_c) to each item, for wave supervision (S-9)."""
+    for it in pool:
+        if "waves" not in it:
+            it["waves"] = CFG.wave_assignments(it["grid"])
+    return pool
+
+
+def get_pools(n_train=1400, n_val=400, need_waves=False):
     def load_or_build(path, n, seed):
         if os.path.exists(path):
             z = np.load(path)
@@ -45,32 +53,61 @@ def get_pools(n_train=1400, n_val=400):
         print(f"[pool] built {len(pool)} attempts={att} "
               f"depths={dict(sorted(counts.items()))}", flush=True)
         return pool
-    return (load_or_build(TRAIN_POOL, n_train, 0),
-            load_or_build(VAL_POOL, n_val, 10_000))
+    tr = load_or_build(TRAIN_POOL, n_train, 0)
+    va = load_or_build(VAL_POOL, n_val, 10_000)
+    if need_waves:
+        t0 = time.time()
+        tr, va = augment_waves(tr), augment_waves(va)
+        print(f"[pool] wave assignments computed in {time.time()-t0:.1f}s", flush=True)
+    return tr, va
 
 
-def build_model(beta=1.0, seed=0):
+def build_model(beta=1.0, seed=0, d=D, dff=DFF, nhead=NH):
     torch.manual_seed(seed)
-    return TinyLoopLM(vocab=CFG.N + 2, d=D, n_head=NH, d_ff=DFF,
+    return TinyLoopLM(vocab=CFG.N + 2, d=d, n_head=nhead, d_ff=dff,
                       max_len=2 * S + 2, max_loops=64, beta=beta,
                       depth_emb=False, state_ln=True)
 
 
-def train(model, src, steps, K_min, K_max, B=12, lr=3e-3, warmup=100, device="cpu"):
+def train(model, src, steps, K_min, K_max, B=12, lr=3e-3, warmup=100,
+          device="cpu", kdist="uniform", wave=False):
     torch.manual_seed(1)
     model.to(device).train()
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     g = torch.Generator().manual_seed(2)
+    import numpy as _np
+    rng = _np.random.default_rng(3)
     t0 = time.time()
     hist = []
+    Tfull = 2 * S
+    pos_base = torch.ones(B, Tfull, dtype=torch.bool, device=device)
     for step in range(steps):
-        x, y, _, _, _ = src.batch_tensors(B, device)
-        K = int(torch.randint(K_min, K_max + 1, (1,), generator=g))
+        x, y, blank, _, items = src.batch_tensors(B, device)
+        if kdist == "lognorm":
+            K = int(_np.clip(round(rng.lognormal(_np.log(4.5), 0.7)), K_min, K_max))
+        else:
+            K = int(torch.randint(K_min, K_max + 1, (1,), generator=g))
+        wv = None
+        if wave:
+            wv = torch.tensor(np.array([it["waves"] for it in items]),
+                              dtype=torch.long, device=device)  # [B, S] wave index per cell
         out = model(x, K)
         logits = out["logits"]
-        loss = torch.stack([
-            F.cross_entropy(logits[k].reshape(-1, logits.shape[-1]).float(),
-                            y.reshape(-1)) for k in range(K)]).mean()
+        if wave:
+            lk = []
+            for k in range(K):
+                ce = F.cross_entropy(logits[k].reshape(-1, logits.shape[-1]).float(),
+                                     y.reshape(-1), reduction="none").reshape(B, Tfull)
+                mask = pos_base.clone()
+                # answer positions (y idx S..2S-1): only cells with w_c <= k+1 (1-based loop)
+                mask[:, S:] = blank & (wv <= (k + 1))
+                if mask.any():
+                    lk.append((ce * mask).sum() / mask.sum())
+            loss = torch.stack(lk).mean()
+        else:
+            loss = torch.stack([
+                F.cross_entropy(logits[k].reshape(-1, logits.shape[-1]).float(),
+                                y.reshape(-1)) for k in range(K)]).mean()
         for pg in opt.param_groups:
             pg["lr"] = lr * min(1.0, (step + 1) / warmup) * \
                 (0.5 * (1 + np.cos(np.pi * step / max(steps, 1))))
@@ -112,10 +149,13 @@ def spearman(x, y):
 
 
 @torch.no_grad()
-def eval_rows(model, val_pool, K=64, batch=25, device="cpu"):
+def eval_rows(model, val_pool, K=64, batch=25, device="cpu", want_wave=False):
     """Per-row telemetry. Returns dict of [K, n] arrays + per-row scalar vectors."""
     model.eval()
     src = SudokuSource(CFG, val_pool, seed=555, shuffle=False)
+    if want_wave:
+        waves = torch.tensor(np.array([it["waves"] for it in val_pool]),
+                             dtype=torch.long)  # [n, S]
     acc, exact, dang, preds, depths = [], [], [], [], []
     n = len(val_pool)
     done = 0
@@ -172,9 +212,23 @@ def eval_rows(model, val_pool, K=64, batch=25, device="cpu"):
             A = np.vstack([ks, np.ones_like(ks)]).T
             coef, *_ = np.linalg.lstsq(A, np.log(d + 1e-9), rcond=None)
             lam_row[r] = math.exp(coef[0])
-    return {"acc": acc, "exact": exact, "dang": dang, "tau_stab": tau_stab,
-            "tau_eps": tau_eps, "lam_row": lam_row, "depth": dep,
-            "blank_counts": blank_counts}
+    res = {"acc": acc, "exact": exact, "dang": dang, "tau_stab": tau_stab,
+           "tau_eps": tau_eps, "lam_row": lam_row, "depth": dep,
+           "blank_counts": blank_counts}
+    if want_wave:
+        # wave-diagonal accuracy: cells with w_c = w measured at loop index w-1
+        wmax = int(waves.max())
+        num, den = 0.0, 0
+        for w in range(1, min(wmax, K) + 1):
+            cell_mask = waves == w                     # [n, S]
+            if not cell_mask.any():
+                continue
+            hits = torch.tensor(pr[w - 1]) == torch.tensor(
+                np.array([it["sol"] for it in val_pool]))
+            num += float(hits[cell_mask].float().mean()) * int(cell_mask.sum())
+            den += int(cell_mask.sum())
+        res["wave_diag_acc"] = num / max(den, 1)
+    return res
 
 
 def analyze(ev, name, K=64):
@@ -196,6 +250,7 @@ def analyze(ev, name, K=64):
         ks = np.arange(1, K + 1, dtype=float)
         fit = geometric_floor_fit(ks, L)
         out[f"Ek_{grp}"] = fit
+    out["wave_diag_acc"] = ev.get("wave_diag_acc")
     out["gap_deep_1_16"] = out.get("acc16_deep", float("nan")) - out.get("acc1_deep", float("nan"))
     out["gap_all_1_16"] = out.get("acc16_all", 0) - out.get("acc1_all", 0)
     out["deg_16_64_deep"] = out.get("acc16_deep", float("nan")) - out.get("acc64_deep", float("nan"))
@@ -238,9 +293,18 @@ def main():
     args = ap.parse_args()
     steps = 40 if args.smoke else args.steps
 
+    all_variants = {"ln_b10": dict(beta=1.0),
+                    "ln_b05": dict(beta=0.5),
+                    "ln_big": dict(beta=1.0, d=96, dff=384, kdist="lognorm"),
+                    "ln_big_wave": dict(beta=1.0, d=96, dff=384, kdist="lognorm",
+                                        wave=True),
+                    }
+    want_names = [n for n in args.variants.split(",") if n in all_variants]
+    need_waves = any(all_variants[n].get("wave") for n in want_names)
     print("[pools]", flush=True)
     train_pool, val_pool = get_pools(n_train=200 if args.smoke else 1400,
-                                   n_val=120 if args.smoke else 400)
+                                     n_val=120 if args.smoke else 400,
+                                     need_waves=need_waves)
     vdep = np.array([p["depth"] for p in val_pool])
     print(f"[pools] train={len(train_pool)} val={len(val_pool)} "
           f"val depths: {dict(sorted(zip(*np.unique(vdep, return_counts=True))))}", flush=True)
@@ -249,17 +313,17 @@ def main():
                           "K_train": [2, 12], "K_eval": 64},
                "val_depth_hist": dict(zip(*[a.tolist() for a in np.unique(vdep, return_counts=True)])),
                "runs": {}}
-    variants = {"ln_b10": dict(beta=1.0), "ln_b05": dict(beta=0.5)}
-    for name in args.variants.split(","):
-        if name not in variants:
-            continue
-        cfgv = variants[name]
-        model = build_model(**cfgv)
+    for name in want_names:
+        cfgv = dict(all_variants[name])
+        model_kw = {k: v for k, v in cfgv.items() if k in ("beta", "d", "dff", "nhead")}
+        model = build_model(**model_kw)
         print(f"[train] {name} params={count_params(model)} steps={steps}", flush=True)
         t0 = time.time()
         src = SudokuSource(CFG, train_pool, seed=11)
-        hist = train(model, src, steps, 2, 12)
-        ev = eval_rows(model, val_pool, K=64)
+        hist = train(model, src, steps, 2, 32 if cfgv.get("kdist") == "lognorm" else 12,
+                     kdist=cfgv.get("kdist", "uniform"),
+                     wave=cfgv.get("wave", False))
+        ev = eval_rows(model, val_pool, K=64, want_wave=cfgv.get("wave", False))
         rep = analyze(ev, name)
         rep["train_loss_final"] = hist[-1]["loss"]
         rep["train_sec"] = time.time() - t0
