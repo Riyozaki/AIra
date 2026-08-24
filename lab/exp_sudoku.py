@@ -62,11 +62,13 @@ def get_pools(n_train=1400, n_val=400, need_waves=False):
     return tr, va
 
 
-def build_model(beta=1.0, seed=0, d=D, dff=DFF, nhead=NH):
+def build_model(beta=1.0, seed=0, d=D, dff=DFF, nhead=NH, inject=False,
+                board9=False):
     torch.manual_seed(seed)
     return TinyLoopLM(vocab=CFG.N + 2, d=d, n_head=nhead, d_ff=dff,
                       max_len=2 * S + 2, max_loops=64, beta=beta,
-                      depth_emb=False, state_ln=True)
+                      depth_emb=False, state_ln=True, inject=inject,
+                      board9=board9)
 
 
 def train(model, src, steps, K_min, K_max, B=12, lr=3e-3, warmup=100,
@@ -298,6 +300,10 @@ def main():
                     "ln_big": dict(beta=1.0, d=96, dff=384, kdist="lognorm"),
                     "ln_big_wave": dict(beta=1.0, d=96, dff=384, kdist="lognorm",
                                         wave=True),
+                    "ln_big_waveinj": dict(beta=1.0, d=96, dff=384, kdist="lognorm",
+                                           wave=True, inject=True),
+                    "ln_big_we": dict(beta=1.0, d=96, dff=384, kdist="lognorm",
+                                      wave=True, inject=True, board9=True),
                     }
     want_names = [n for n in args.variants.split(",") if n in all_variants]
     need_waves = any(all_variants[n].get("wave") for n in want_names)
@@ -315,7 +321,8 @@ def main():
                "runs": {}}
     for name in want_names:
         cfgv = dict(all_variants[name])
-        model_kw = {k: v for k, v in cfgv.items() if k in ("beta", "d", "dff", "nhead")}
+        model_kw = {k: v for k, v in cfgv.items()
+                    if k in ("beta", "d", "dff", "nhead", "inject", "board9")}
         model = build_model(**model_kw)
         print(f"[train] {name} params={count_params(model)} steps={steps}", flush=True)
         t0 = time.time()

@@ -102,12 +102,22 @@ class TinyLoopLM(nn.Module):
                  max_len: int = 256, max_loops: int = 64, beta: float = 1.0,
                  depth_emb: bool = False, two_time: bool = False,
                  slow_m: int = 8, use_slow: bool = True, state_ln: bool = False,
-                 slow_ln: bool = False):
+                 slow_ln: bool = False, inject: bool = False,
+                 board9: bool = False):
         super().__init__()
         self.tok = nn.Embedding(vocab, d)
         self.pos = nn.Embedding(max_len, d)
+        # G0S S-11: structural row/col/box embeddings for 9x9 board layout
+        self.board9 = board9
+        if board9:
+            self.e_row = nn.Embedding(9, d)
+            self.e_col = nn.Embedding(9, d)
+            self.e_box = nn.Embedding(9, d)
         self.ln_out = nn.LayerNorm(d)
         self.ln_state = nn.LayerNorm(d, elementwise_affine=False) if state_ln else None
+        # kernel v3 (G0S S-10): per-loop input injection with learnable per-channel gain
+        self.e_proj = nn.Linear(d, d, bias=False) if inject else None
+        self.e_gain = nn.Parameter(torch.full((d,), 0.1)) if inject else None
         if two_time:
             self.core = TwoTimeCore(d, n_head, d_ff, m=slow_m, beta=beta,
                                     use_slow=use_slow, slow_ln=slow_ln)
@@ -118,13 +128,27 @@ class TinyLoopLM(nn.Module):
 
     def embed(self, x: torch.Tensor) -> torch.Tensor:
         T = x.shape[1]
-        return self.tok(x) + self.pos.weight[:T].unsqueeze(0)
+        h = self.tok(x) + self.pos.weight[:T].unsqueeze(0)
+        if self.board9 and T >= 2 * 81:
+            # seq = [grid 0..80, SEP 81, sol 82..162]; x = seq[:-1] covers 0..161:
+            # positions 0..80 -> grid cells; 81 -> SEP (no emb); 82..161 -> sol cells 0..79
+            emb = torch.zeros_like(h)
+            rows = torch.arange(81, device=x.device) // 9
+            cols = torch.arange(81, device=x.device) % 9
+            box = (rows // 3) * 3 + cols // 3
+            cell = self.e_row(rows) + self.e_col(cols) + self.e_box(box)
+            emb[:, 0:81] = cell
+            n_ans = T - 82
+            emb[:, 82:82 + n_ans] = cell[:n_ans]
+            h = h + emb
+        return h
 
     def head(self, h: torch.Tensor) -> torch.Tensor:
         return F.linear(self.ln_out(h), self.tok.weight)
 
     def forward(self, x: torch.Tensor, K: int, want_hiddens: bool = False):
         h = self.embed(x)
+        e_inj = (self.e_gain * self.e_proj(h)) if self.e_proj is not None else None
         state = {"s": torch.zeros(x.shape[0], self.d), "s_updates": 0} if self.two_time else None
         logits, hiddens, states = [], [h], []
         for k in range(K):
@@ -133,6 +157,8 @@ class TinyLoopLM(nn.Module):
                 states.append(state["s"].detach().clone())
             else:
                 h = self.core(h, k)
+            if e_inj is not None:
+                h = h + e_inj
             if self.ln_state is not None:
                 h = self.ln_state(h)
             logits.append(self.head(h))
