@@ -1,32 +1,32 @@
 [train] m1 (m=1, slow=True) params=115712 steps=30
-  step 1/30 loss 36.4077 K=6 (0.139s/step)
-  step 15/30 loss 22.9741 K=6 (0.130s/step)
-  step 30/30 loss 16.0630 K=6 (0.111s/step)
+  step 1/30 loss 36.4077 K=6 (0.082s/step)
+  step 15/30 loss 22.9741 K=6 (0.063s/step)
+  step 30/30 loss 16.0630 K=6 (0.070s/step)
 [done] m1: L_final=6.9901 hard=6.9890 accH=0.041 lam_slow=0.8889
 [train] m2 (m=2, slow=True) params=115712 steps=30
-  step 1/30 loss 36.6030 K=6 (0.083s/step)
-  step 15/30 loss 23.2150 K=6 (0.079s/step)
-  step 30/30 loss 15.6466 K=6 (0.088s/step)
+  step 1/30 loss 36.6030 K=6 (0.060s/step)
+  step 15/30 loss 23.2150 K=6 (0.059s/step)
+  step 30/30 loss 15.6466 K=6 (0.066s/step)
 [done] m2: L_final=7.0508 hard=7.0878 accH=0.048 lam_slow=0.9350
 [train] m4 (m=4, slow=True) params=115712 steps=30
-  step 1/30 loss 36.7140 K=6 (0.089s/step)
-  step 15/30 loss 23.2316 K=6 (0.071s/step)
-  step 30/30 loss 16.2171 K=6 (0.084s/step)
+  step 1/30 loss 36.7140 K=6 (0.070s/step)
+  step 15/30 loss 23.2316 K=6 (0.061s/step)
+  step 30/30 loss 16.2171 K=6 (0.066s/step)
 [done] m4: L_final=8.0634 hard=8.1457 accH=0.030 lam_slow=0.9746
 [train] m8 (m=8, slow=True) params=115712 steps=30
-  step 1/30 loss 37.0980 K=6 (0.069s/step)
-  step 15/30 loss 23.3935 K=6 (0.072s/step)
-  step 30/30 loss 16.1666 K=6 (0.087s/step)
+  step 1/30 loss 37.0980 K=6 (0.057s/step)
+  step 15/30 loss 23.3935 K=6 (0.058s/step)
+  step 30/30 loss 16.1666 K=6 (0.068s/step)
 [done] m8: L_final=5.8328 hard=5.9818 accH=0.056 lam_slow=0.9796
 [train] m16 (m=16, slow=True) params=115712 steps=30
-  step 1/30 loss 36.9872 K=6 (0.113s/step)
-  step 15/30 loss 22.7723 K=6 (0.097s/step)
-  step 30/30 loss 16.2080 K=6 (0.103s/step)
+  step 1/30 loss 36.9872 K=6 (0.080s/step)
+  step 15/30 loss 22.7723 K=6 (0.070s/step)
+  step 30/30 loss 16.2080 K=6 (0.077s/step)
 [done] m16: L_final=5.5935 hard=5.4432 accH=0.034 lam_slow=nan
 [train] noslow (m=1, slow=False) params=115712 steps=30
-  step 1/30 loss 37.2150 K=6 (0.078s/step)
-  step 15/30 loss 30.0799 K=6 (0.075s/step)
-  step 30/30 loss 25.4918 K=6 (0.083s/step)
+  step 1/30 loss 37.2150 K=6 (0.064s/step)
+  step 15/30 loss 30.0799 K=6 (0.066s/step)
+  step 30/30 loss 25.4918 K=6 (0.072s/step)
 [done] noslow: L_final=6.4514 hard=6.7386 accH=0.035 lam_slow=0.0000
 [saved] /home/user/AIra/results/selftest/msweep.json
 

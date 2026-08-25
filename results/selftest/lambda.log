@@ -4,14 +4,14 @@
 [init] beta=1.0: lam_disp=2.0000 (r2=1.000) lam_pert=1.9999 lam_J=1.9999
 [train] trained_beta1 params=57792 steps=40
   step 1/40 loss 45.6466 K=2 (0.030s/step)
-  step 20/40 loss 44.4944 K=3 (0.061s/step)
-  step 40/40 loss 41.8060 K=6 (0.064s/step)
+  step 20/40 loss 44.4944 K=3 (0.060s/step)
+  step 40/40 loss 41.8060 K=6 (0.060s/step)
 [eval] trained_beta1 @ K=64
 [done] trained_beta1: lam_disp=2.0000 CI90=[nan, nan] pert=1.9999 J=1.9999
 [train] trained_beta1_DE params=61888 steps=40
-  step 1/40 loss 44.0828 K=2 (0.032s/step)
-  step 20/40 loss 40.1014 K=3 (0.061s/step)
-  step 40/40 loss 34.2816 K=6 (0.064s/step)
+  step 1/40 loss 44.0828 K=2 (0.026s/step)
+  step 20/40 loss 40.1014 K=3 (0.059s/step)
+  step 40/40 loss 34.2816 K=6 (0.059s/step)
 [eval] trained_beta1_DE @ K=64
 [done] trained_beta1_DE: lam_disp=1.9998 CI90=[nan, nan] pert=1.9999 J=1.9999
 [saved] /home/user/AIra/results/selftest/lambda.json

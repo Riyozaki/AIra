@@ -29,8 +29,11 @@ class SharedCore(nn.Module):
         self.mlp = nn.Sequential(nn.Linear(d, d_ff), nn.GELU(), nn.Linear(d_ff, d))
         self.depth_emb = nn.Embedding(max_loops, d) if depth_emb else None
 
-    def f(self, h: torch.Tensor, k: int = 0) -> torch.Tensor:
-        """Non-residual part f(h). h: [B, T, D]."""
+    def f(self, h: torch.Tensor, k: int = 0,
+            block_mask: torch.Tensor = None) -> torch.Tensor:
+        """Non-residual part f(h). h: [B, T, D].
+        block_mask: optional extra bool [T,T] (True = block attention), ORed
+        with the causal mask. Used by CDEMO R5 (slots must not read slots)."""
         x = h
         if self.depth_emb is not None:
             x = x + self.depth_emb.weight[k].view(1, 1, -1)
@@ -44,6 +47,8 @@ class SharedCore(nn.Module):
         # manual attention: keeps double-backward (JVP) working on CPU
         scores = q @ k_.transpose(-2, -1) / math.sqrt(hd)
         mask = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device), 1)
+        if block_mask is not None:
+            mask = mask | block_mask
         scores = scores.masked_fill(mask, float("-inf"))
         a = torch.softmax(scores, dim=-1) @ v
         a = a.transpose(1, 2).reshape(B, T, D)
@@ -51,8 +56,9 @@ class SharedCore(nn.Module):
         x = x + self.mlp(self.ln2(x))
         return x
 
-    def forward(self, h: torch.Tensor, k: int = 0) -> torch.Tensor:
-        return h + self.beta * self.f(h, k)
+    def forward(self, h: torch.Tensor, k: int = 0,
+                block_mask: torch.Tensor = None) -> torch.Tensor:
+        return h + self.beta * self.f(h, k, block_mask=block_mask)
 
 
 class TwoTimeCore(nn.Module):
@@ -146,7 +152,8 @@ class TinyLoopLM(nn.Module):
     def head(self, h: torch.Tensor) -> torch.Tensor:
         return F.linear(self.ln_out(h), self.tok.weight)
 
-    def forward(self, x: torch.Tensor, K: int, want_hiddens: bool = False):
+    def forward(self, x: torch.Tensor, K: int, want_hiddens: bool = False,
+                block_mask: torch.Tensor = None):
         h = self.embed(x)
         e_inj = (self.e_gain * self.e_proj(h)) if self.e_proj is not None else None
         state = {"s": torch.zeros(x.shape[0], self.d), "s_updates": 0} if self.two_time else None
@@ -156,7 +163,7 @@ class TinyLoopLM(nn.Module):
                 h = self.core(h, k, state)
                 states.append(state["s"].detach().clone())
             else:
-                h = self.core(h, k)
+                h = self.core(h, k, block_mask=block_mask)
             if e_inj is not None:
                 h = h + e_inj
             if self.ln_state is not None:

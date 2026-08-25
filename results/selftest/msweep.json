@@ -17,7 +17,7 @@
       "L_hard_final": 6.988961577415466,
       "acc_hard_final": 0.04074770724400878,
       "lam_slow_step": 0.888854518532753,
-      "train_sec": 5.718518257141113,
+      "train_sec": 3.7895448207855225,
       "n_params": 115712,
       "m": 1,
       "use_slow": true
@@ -27,7 +27,7 @@
       "L_hard_final": 7.087750554084778,
       "acc_hard_final": 0.04828139906749129,
       "lam_slow_step": 0.9349918514490128,
-      "train_sec": 3.5599255561828613,
+      "train_sec": 2.782625198364258,
       "n_params": 115712,
       "m": 2,
       "use_slow": true
@@ -37,7 +37,7 @@
       "L_hard_final": 8.145723938941956,
       "acc_hard_final": 0.02967682760208845,
       "lam_slow_step": 0.9746132642030716,
-      "train_sec": 3.6410460472106934,
+      "train_sec": 2.718942165374756,
       "n_params": 115712,
       "m": 4,
       "use_slow": true
@@ -47,7 +47,7 @@
       "L_hard_final": 5.98182737827301,
       "acc_hard_final": 0.056113872211426497,
       "lam_slow_step": 0.9795971661806107,
-      "train_sec": 3.975864887237549,
+      "train_sec": 2.8763277530670166,
       "n_params": 115712,
       "m": 8,
       "use_slow": true
@@ -57,7 +57,7 @@
       "L_hard_final": 5.443243980407715,
       "acc_hard_final": 0.03391556767746806,
       "lam_slow_step": NaN,
-      "train_sec": 4.032466173171997,
+      "train_sec": 3.0929036140441895,
       "n_params": 115712,
       "m": 16,
       "use_slow": true
@@ -67,7 +67,7 @@
       "L_hard_final": 6.738609075546265,
       "acc_hard_final": 0.035339439287781715,
       "lam_slow_step": 0.0,
-      "train_sec": 3.4998722076416016,
+      "train_sec": 2.9324212074279785,
       "n_params": 115712,
       "m": 1,
       "use_slow": false

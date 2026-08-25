@@ -1,15 +1,15 @@
 [pools]
-[pool] wave assignments computed in 3.1s
+[pool] wave assignments computed in 3.0s
 [pools] train=1400 val=400 val depths: {np.int64(4): np.int64(29), np.int64(5): np.int64(111), np.int64(6): np.int64(115), np.int64(7): np.int64(69), np.int64(8): np.int64(41), np.int64(9): np.int64(22), np.int64(10): np.int64(5), np.int64(11): np.int64(4), np.int64(12): np.int64(2), np.int64(13): np.int64(2)}
 [train] ln_big_we params=140736 steps=40
-  step 5/40 loss 30.827 K=3 (0.210s/step)
-  step 10/40 loss 13.499 K=32 (0.232s/step)
-  step 15/40 loss 27.785 K=2 (0.190s/step)
-  step 20/40 loss 22.703 K=4 (0.183s/step)
-  step 25/40 loss 20.340 K=4 (0.182s/step)
-  step 30/40 loss 10.857 K=9 (0.188s/step)
-  step 35/40 loss 14.476 K=5 (0.182s/step)
-  step 40/40 loss 23.476 K=2 (0.174s/step)
+  step 5/40 loss 30.827 K=3 (0.170s/step)
+  step 10/40 loss 13.499 K=32 (0.185s/step)
+  step 15/40 loss 27.785 K=2 (0.151s/step)
+  step 20/40 loss 22.703 K=4 (0.142s/step)
+  step 25/40 loss 20.340 K=4 (0.143s/step)
+  step 30/40 loss 10.857 K=9 (0.154s/step)
+  step 35/40 loss 14.476 K=5 (0.152s/step)
+  step 40/40 loss 23.476 K=2 (0.147s/step)
 [done] ln_big_we: acc1/16/64 all=0.016/0.086/0.093 deep gap=0.069 rho_tau=0.02 lam_row=0.716 save=0.14
 [saved] /home/user/AIra/results/selftest/sudoku.json
 
