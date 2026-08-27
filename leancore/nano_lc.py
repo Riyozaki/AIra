@@ -265,9 +265,9 @@ class AdamW:
 
 def main():
     args = ap_parse()
-    tr = np.load(f"{ROOT}/data/prep/train.npy").astype(np.int64)
-    va = np.load(f"{ROOT}/data/prep/val.npy").astype(np.int64)
-    V = json.load(open(f"{ROOT}/data/prep/meta.json"))["vocab"]
+    tr = np.load(f"{ROOT}/{args.data}/train.npy").astype(np.int64)
+    va = np.load(f"{ROOT}/{args.data}/val.npy").astype(np.int64)
+    V = json.load(open(f"{ROOT}/{args.data}/meta.json"))["vocab"]
     rng = np.random.default_rng(42)
     model = NanoGPT(V, kind=args.kind, adr_kf=args.adr)
     if args.initckpt:
@@ -329,6 +329,7 @@ def ap_parse():
     ap.add_argument("--warmup", type=int, default=60)
     ap.add_argument("--eval_every", type=int, default=50)
     ap.add_argument("--initckpt", default=None)
+    ap.add_argument("--data", default="data/prep")
     return ap.parse_args()
 
 if __name__ == "__main__":

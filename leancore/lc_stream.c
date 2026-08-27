@@ -109,7 +109,9 @@ static void logits_of(const float* x, float* lg /*V*/) {
     static float z[1024];
     memcpy(z, x, D * 4);
     lnrow(z, find("lnf")->data, find("lnf.bias")->data);
-    mat_f32(z, find("Et")->data, lg, D, V);
+    Tensor* et = find("Et");
+    if (et->dt == 2) mat_q(z, et, lg, D, V);
+    else mat_f32(z, et->data, lg, D, V);
 }
 
 int main(int argc, char** argv) {
@@ -129,7 +131,7 @@ int main(int argc, char** argv) {
         t->data = malloc(bytes); fread(t->data, 1, bytes, f);
     }
     fclose(f);
-    {   // голова fp16 → fp32 один раз (скорость SIMD-пути в рантайме)
+    if (find("Et")->dt != 2) {   // голова fp16 → fp32 один раз (int8-вариант не трогаем)
         Tensor* et = find("Et");
         size_t n = 1; for (uint32_t j = 0; j < et->nd; j++) n *= et->dims[j];
         const uint16_t* src = et->data; float* dst = malloc(n * 4);

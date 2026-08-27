@@ -38,7 +38,13 @@ for i in range(L):
 
 add("E", d["E"].astype(np.float16), 3)
 add("pos", d["pos"].astype(np.float16), 3)
-add("Et", d["E"].astype(np.float16).T.copy(), 3)      # голова fp16 (D,V)
+if "--i8head" in sys.argv:
+    Wt = d["E"].astype(np.float32).T
+    sh = np.abs(Wt).mean(0).clip(1e-6)                    # per-out absmean (мягкое int8)
+    q8 = np.clip(np.rint(Wt / sh[None, :] * 127), -127, 127).astype(np.int8)
+    add("Et", np.ascontiguousarray(q8), 2); add("Et.s", (sh / 127).astype(np.float16), 3)
+else:
+    add("Et", d["E"].astype(np.float16).T.copy(), 3)      # голова fp16 (D,V)
 add("lnf", d["lnfg"].astype(np.float16), 3); add("lnf.bias", d["lnfb"].astype(np.float16), 3)
 
 with open(DST, "wb") as f:
