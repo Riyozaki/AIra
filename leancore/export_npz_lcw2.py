@@ -27,11 +27,13 @@ for i in range(L):
     add(p + "ln1", d[p + "ln1g"].astype(np.float16), 3); add(p + "ln1.bias", d[p + "ln1b"].astype(np.float16), 3)
     add(p + "th", d[p + "th"].astype(np.float16), 3);  add(p + "sc", d[p + "sc"].astype(np.float16), 3)
     q, s = tern_outscale(d[p + "Wm"].astype(np.float32))
-    add(p + "Wm", q, 2); add(p + "Wm.s", s, 3)
+    add(p + "Wm", np.ascontiguousarray(q.T), 2); add(p + "Wm.s", s, 3)
+    add(p + "Wm.qs", q.astype(np.int32).sum(0).astype(np.int32), 0)
     add(p + "ln2", d[p + "ln2g"].astype(np.float16), 3); add(p + "ln2.bias", d[p + "ln2b"].astype(np.float16), 3)
     for nm in ("fc1", "fc2"):
         q, s = tern_outscale(d[p + nm].astype(np.float32))
-        add(p + nm, q, 2); add(p + nm + ".s", s, 3)
+        add(p + nm, np.ascontiguousarray(q.T), 2); add(p + nm + ".s", s, 3)
+        add(p + nm + ".qs", q.astype(np.int32).sum(0).astype(np.int32), 0)   # Σ по входу для u8-офсета
     if p + "rw" in d:
         add(p + "rw", d[p + "rw"].astype(np.float16), 3)
         add(p + "rb", np.asarray(d[p + "rb"], np.float32).reshape(1).astype(np.float16), 3)

@@ -157,7 +157,7 @@ static void step(const int tok, float* x /*D*/) {
         snprintf(nm, 72, "b%u.ln2", l); const uint16_t* g2 = find(nm)->data;
         snprintf(nm, 72, "b%u.ln2.bias", l); const uint16_t* b2 = find(nm)->data;
         lnrow(y, g2, b2);
-        uint32_t F = QQ8 ? find("b0.fc1")->dims[0] : find("b0.fc1")->dims[1];
+        uint32_t F = find("b0.fc1")->dims[1];
         snprintf(nm, 72, "b%u.fc1", l);
         if (QQ8) mat_qq8(y, find(nm), f1, D, F); else mat_q(y, find(nm), f1, D, F);
         for (uint32_t j = 0; j < F; j++) f1[j] = gelu(f1[j]);
@@ -181,26 +181,18 @@ static void logits_of(const float* x, float* lg /*V*/) {
     const uint16_t* so = find("EtT.s")->data;
     const int32_t* qs = find("EtT.qsum")->data;
     if (D % 64 == 0) {
-        uint32_t v = 0;
-        for (; v + 4 <= V; v += 4) {
-            const int8_t* q0 = Q + (size_t)(v+0)*D; const int8_t* q1 = Q + (size_t)(v+1)*D;
-            const int8_t* q2 = Q + (size_t)(v+2)*D; const int8_t* q3 = Q + (size_t)(v+3)*D;
-            __m512i a0 = _mm512_setzero_si512(), a1 = a0, a2 = a0, a3 = a0;
-            const __m512i ones = _mm512_set1_epi16(1);
+        for (uint32_t v = 0; v < V; v++) {
+            const int8_t* qrow = Q + (size_t)v * D;
+            __m512i acc = _mm512_setzero_si512();
             for (uint32_t c = 0; c < D; c += 64) {
                 __m512i xb = _mm512_loadu_si512((const void*)(xq + c));
-                a0 = _mm512_add_epi32(a0, _mm512_madd_epi16(_mm512_maddubs_epi16(xb, _mm512_loadu_si512((const void*)(q0+c))), ones));
-                a1 = _mm512_add_epi32(a1, _mm512_madd_epi16(_mm512_maddubs_epi16(xb, _mm512_loadu_si512((const void*)(q1+c))), ones));
-                a2 = _mm512_add_epi32(a2, _mm512_madd_epi16(_mm512_maddubs_epi16(xb, _mm512_loadu_si512((const void*)(q2+c))), ones));
-                a3 = _mm512_add_epi32(a3, _mm512_madd_epi16(_mm512_maddubs_epi16(xb, _mm512_loadu_si512((const void*)(q3+c))), ones));
+                __m512i qb = _mm512_loadu_si512((const void*)(qrow + c));
+                __m512i pr = _mm512_maddubs_epi16(xb, qb);          // u8×i8 → i16 попарные
+                acc = _mm512_add_epi32(acc, _mm512_madd_epi16(pr, _mm512_set1_epi16(1)));
             }
-            lg[v+0] = (float)(_mm512_reduce_add_epi32(a0) - 128*qs[v+0]) * (sx * f16(so[v+0]));
-            lg[v+1] = (float)(_mm512_reduce_add_epi32(a1) - 128*qs[v+1]) * (sx * f16(so[v+1]));
-            lg[v+2] = (float)(_mm512_reduce_add_epi32(a2) - 128*qs[v+2]) * (sx * f16(so[v+2]));
-            lg[v+3] = (float)(_mm512_reduce_add_epi32(a3) - 128*qs[v+3]) * (sx * f16(so[v+3]));
+            int32_t dot = _mm512_reduce_add_epi32(acc) - 128 * qs[v];
+            lg[v] = (float)dot * sx * f16(so[v]);
         }
-        for (; v < V; v++)
-            lg[v] = (float)(dot8_u8(xq, Q + (size_t)v*D, D) - 128*qs[v]) * (sx * f16(so[v]));
     } else {                                             // откат: плотный скаляр
         for (uint32_t v = 0; v < V; v++) {
             const int8_t* qrow = Q + (size_t)v * D;
