@@ -37,10 +37,18 @@ def main():
     for _ in range(10):
         st = rng.integers(0, len(va) - 97, size=16)
         for s in st:
+            sp = sp_id if sp_id >= 0 else 1 << 30
+            word0 = sp + 1 - 0 if False else None
+            # v2: слова начинаются с id>=54 (после спец 4 + 50 чаров); v1 — все word-токены
+            cid0 = meta["stoi"].get("<bos>")
+            chars_end = 4 + 50 if "prep4k" in datadir else 0
             for t in va[s:s+96]:
-                w = itos.get(str(int(t)), "")
-                if re.fullmatch(r"[a-z']+", w): nwords += 1
-                elif int(t) == unk_id or (sp_id >= 0 and int(t) == sp_id): nwords += 1
+                t = int(t)
+                if "prep4k" in datadir:
+                    if t >= 4 + 50 or t == sp: nwords += 1      # слово- или <sp>-токен
+                else:
+                    w = itos.get(str(t), "")
+                    if re.fullmatch(r"[a-z']+", w) or t == unk_id: nwords += 1
     print(json.dumps(dict(ckpt=os.path.basename(ckpt), data=datadir,
                           token_nll=round(tot / ntok, 4),
                           word_ppl=round(math.exp(tot / nwords), 2),
