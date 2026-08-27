@@ -71,6 +71,8 @@ static inline float gelu(float x) {
 
 static float* HSTATE[16];
 static int TT = 0;
+static double T_BODY = 0, T_HEAD = 0;
+static inline double now_s(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + 1e-9*t.tv_nsec; }
 static void reset_states(void) { for (uint32_t l = 0; l < L; l++) memset(HSTATE[l], 0, D * 4); TT = 0; }
 
 static void step(const int tok, float* x /*D*/) {
@@ -114,13 +116,40 @@ static void step(const int tok, float* x /*D*/) {
     }
     TT++;
 }
+// голова int8×int8: активации квантуются динамически (absmax→127), качество ≡ fp32 (numpy: Δ+0.0004 ната)
 static void logits_of(const float* x, float* lg /*V*/) {
     static float z[1024];
     memcpy(z, x, D * 4);
     lnrow(z, find("lnf")->data, find("lnf.bias")->data);
-    Tensor* et = find("Et");
-    if (et->dt == 2) mat_q(z, et, lg, D, V);
-    else mat_f32(z, et->data, lg, D, V);
+    float ax = 0.f; for (uint32_t i = 0; i < D; i++) { float a = fabsf(z[i]); if (a > ax) ax = a; }
+    float sx = ax > 0 ? ax / 127.f : 1.f;
+    static uint8_t xq[1024];
+    __m512i sh = _mm512_set1_epi8(-128);
+    for (uint32_t i = 0; i < D; i++) xq[i] = (uint8_t)((int)lrintf(z[i] / sx) + 128);
+    const int8_t* Q = find("EtT")->data;                 // (V,D) row-major
+    const uint16_t* so = find("EtT.s")->data;
+    const int32_t* qs = find("EtT.qsum")->data;
+    if (D % 64 == 0) {
+        for (uint32_t v = 0; v < V; v++) {
+            const int8_t* qrow = Q + (size_t)v * D;
+            __m512i acc = _mm512_setzero_si512();
+            for (uint32_t c = 0; c < D; c += 64) {
+                __m512i xb = _mm512_loadu_si512((const void*)(xq + c));
+                __m512i qb = _mm512_loadu_si512((const void*)(qrow + c));
+                __m512i pr = _mm512_maddubs_epi16(xb, qb);          // u8×i8 → i16 попарные
+                acc = _mm512_add_epi32(acc, _mm512_madd_epi16(pr, _mm512_set1_epi16(1)));
+            }
+            int32_t dot = _mm512_reduce_add_epi32(acc) - 128 * qs[v];
+            lg[v] = (float)dot * sx * f16(so[v]);
+        }
+    } else {                                             // откат: плотный скаляр
+        for (uint32_t v = 0; v < V; v++) {
+            const int8_t* qrow = Q + (size_t)v * D;
+            int32_t dot = -128 * qs[v];
+            for (uint32_t i = 0; i < D; i++) dot += (int)(xq[i]) * qrow[i];
+            lg[v] = (float)dot * sx * f16(so[v]);
+        }
+    }
 }
 
 int main(int argc, char** argv) {
@@ -136,17 +165,10 @@ int main(int argc, char** argv) {
         Tensor* t = &TENS[i]; fread(t->name, 1, nl, f); t->name[nl] = 0;
         fread(&t->dt, 1, 1, f); fread(&t->nd, 4, 1, f); fread(t->dims, 4, t->nd, f);
         size_t bytes = 1; for (uint32_t j = 0; j < t->nd; j++) bytes *= t->dims[j];
-        bytes *= (t->dt == 2 ? 1 : 2);
+        bytes *= (t->dt == 2 ? 1 : (t->dt == 0 ? 4 : 2));
         t->data = malloc(bytes); fread(t->data, 1, bytes, f);
     }
     fclose(f);
-    if (find("Et")->dt != 2) {   // голова fp16 → fp32 один раз (int8-вариант не трогаем)
-        Tensor* et = find("Et");
-        size_t n = 1; for (uint32_t j = 0; j < et->nd; j++) n *= et->dims[j];
-        const uint16_t* src = et->data; float* dst = malloc(n * 4);
-        for (size_t i = 0; i < n; i++) dst[i] = f16(src[i]);
-        free(et->data); et->data = dst; et->dt = 0;
-    }
     for (uint32_t l = 0; l < L; l++) HSTATE[l] = malloc(D * 4);
     static float x[1024]; static float* lg = NULL; lg = malloc(V * 4);
     if (!strcmp(argv[2], "bench")) {
@@ -155,15 +177,17 @@ int main(int argc, char** argv) {
         reset_states();
         clock_gettime(CLOCK_MONOTONIC, &a);
         for (int gg = 0; gg < n; gg++) {
-            step(cur, x);
-            logits_of(x, lg);
-            int best = 1; float bl = lg[1];
+            double t0 = now_s(); step(cur, x); double t1 = now_s();
+            logits_of(x, lg); double t2 = now_s();
+            T_BODY += t1 - t0; T_HEAD += t2 - t1;
+                int best = 1; float bl = lg[1];
             for (uint32_t j = 2; j < V; j++) if (lg[j] > bl) { bl = lg[j]; best = j; }
             cur = best;
         }
         clock_gettime(CLOCK_MONOTONIC, &b);
         double dt = (double)(b.tv_sec - a.tv_sec) + 1e-9 * (b.tv_nsec - a.tv_nsec);
-        printf("stream int8: %d tokens in %.3fs -> %.1f tok/s\n", n, dt, n / dt);
+        printf("stream int8: %d tokens in %.3fs -> %.1f tok/s | body %.1f%% head %.1f%%\n",
+               n, dt, n / dt, 100*T_BODY/dt, 100*T_HEAD/dt);
     } else if (!strcmp(argv[2], "ppl")) {
         FILE* vf = fopen(argv[3], "rb");
         fseek(vf, 8, SEEK_SET); uint16_t hl; fread(&hl, 2, 1, vf); fseek(vf, 10 + hl, SEEK_SET);

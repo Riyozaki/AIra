@@ -39,10 +39,13 @@ for i in range(L):
 add("E", d["E"].astype(np.float16), 3)
 add("pos", d["pos"].astype(np.float16), 3)
 if True or "--i8head" in sys.argv:
-    Wt = d["E"].astype(np.float32).T
-    sh = np.abs(Wt).max(0).clip(1e-6)                     # per-out absmax (numpy: Δ+0.0009 ната!)
+    Wt = d["E"].astype(np.float32).T                      # (D,V)
+    sh = np.abs(Wt).max(0).clip(1e-6)                     # per-out absmax
     q8 = np.clip(np.rint(Wt / sh[None, :] * 127), -127, 127).astype(np.int8)
-    add("Et", np.ascontiguousarray(q8), 2); add("Et.s", (sh / 127).astype(np.float16), 3)
+    qT = np.ascontiguousarray(q8.T.copy())                # (V,D) row-major для VNNI-стиля
+    add("EtT", qT, 2)                                     # транспонированная голова
+    add("EtT.s", (sh / 127).astype(np.float16), 3)
+    add("EtT.qsum", q8.T.astype(np.int32).sum(1).astype(np.int32), 0)   # Σ_d q[v,d] для офсета
 else:
     add("Et", d["E"].astype(np.float16).T.copy(), 3)      # голова fp16 (D,V)
 add("lnf", d["lnfg"].astype(np.float16), 3); add("lnf.bias", d["lnfb"].astype(np.float16), 3)
@@ -55,5 +58,5 @@ with open(DST, "wb") as f:
         f.write(struct.pack("<Q", len(name))); f.write(name)
         f.write(struct.pack("<BI", dt, arr.ndim))
         f.write(struct.pack(f"<{arr.ndim}I", *arr.shape))
-        f.write(arr.tobytes())
+        f.write(arr.tobytes())  # payload бинарно по dtype-размеру dt
 print(f"wrote {DST}: {os.path.getsize(DST):,} bytes, {len(recs)} recs, L={L} D={D} V={V} T={T} tau={TAU}")
