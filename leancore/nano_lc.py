@@ -49,8 +49,16 @@ def layernorm_bwd(c, dy):
     dx = (istd / N) * (N * v - v.sum(-1, keepdims=True) - xhat * (v * xhat).sum(-1, keepdims=True))
     return dx, dg, db
 
+ACTQ8 = False   # QAT-режим: квантование активаций int8 (динамический absmax на строку) перед матмулом
+
+def _actq(x):
+    am = np.abs(x).max(-1, keepdims=True)
+    am = np.where(am < 1e-8, np.ones_like(am), am)
+    return np.rint(x / am * 127) * (am / 127)
+
 def linear(x, W):                              # (..., in) @ (in,out)
-    return x @ W, (x, W)
+    xq = _actq(x) if ACTQ8 else x
+    return xq @ W, (xq, W)                     # градиент по квантованному входу (STE-стандарт)
 def linear_bwd(c, dy):
     x, W = c
     dw = x.reshape(-1, x.shape[-1]).T @ dy.reshape(-1, dy.shape[-1])

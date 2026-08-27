@@ -6,6 +6,7 @@
 import os, sys, json, math, time
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import nano_lc
 from nano_lc import NanoGPT, AdamW, softmax_ce
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -18,6 +19,9 @@ def tern(W):
 ckpt, kind = sys.argv[1], sys.argv[2]
 adr = None if sys.argv[3] == "none" else float(sys.argv[3])
 steps = int(sys.argv[4]) if len(sys.argv) > 4 else 300
+if "--actq8" in sys.argv:
+    nano_lc.ACTQ8 = True
+    print("activation-int8 QAT включён", flush=True)
 tag = os.path.basename(ckpt).replace("ckpt_", "").replace(".npz", "") + f"_qat{steps}"
 
 d = dict(np.load(ckpt))
