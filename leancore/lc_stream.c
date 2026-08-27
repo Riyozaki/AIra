@@ -28,7 +28,8 @@ static Tensor* find0(const char* n) {
 }
 static Tensor* find(const char* n) { Tensor* t = find0(n); if (!t) { fprintf(stderr, "missing %s\n", n); exit(1);} return t; }
 
-// out = (x @ Q) ⊙ s_out — плотный int8-путь (конверсия+мад: автовекторизуется)
+// out = (x @ Q) ⊙ s_out — AVX512: 16 int8 → int32 → ps, FMA по 16 выходам за такт
+#include <immintrin.h>
 static void mat_q(const float* x, const Tensor* Qt, float* out, int in, int od) {
     const int8_t* W = Qt->data; char nm[72]; snprintf(nm, 72, "%s.s", Qt->name);
     const uint16_t* so = find(nm)->data;
@@ -36,7 +37,15 @@ static void mat_q(const float* x, const Tensor* Qt, float* out, int in, int od) 
     for (int i = 0; i < in; i++) {
         float xi = x[i]; if (xi == 0.f) continue;
         const int8_t* w = W + (size_t)i * od;
-        for (int j = 0; j < od; j++) out[j] += xi * (float)w[j];
+        __m512 xv = _mm512_set1_ps(xi);
+        int j = 0;
+        for (; j + 16 <= od; j += 16) {
+            __m128i qb = _mm_loadu_si128((const __m128i*)(w + j));
+            __m512 qf = _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(qb));
+            __m512 acc = _mm512_loadu_ps(out + j);
+            _mm512_storeu_ps(out + j, _mm512_fmadd_ps(xv, qf, acc));
+        }
+        for (; j < od; j++) out[j] += xi * (float)w[j];
     }
     for (int j = 0; j < od; j++) out[j] *= f16(so[j]);
 }

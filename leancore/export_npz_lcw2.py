@@ -38,9 +38,9 @@ for i in range(L):
 
 add("E", d["E"].astype(np.float16), 3)
 add("pos", d["pos"].astype(np.float16), 3)
-if "--i8head" in sys.argv:
+if True or "--i8head" in sys.argv:
     Wt = d["E"].astype(np.float32).T
-    sh = np.abs(Wt).mean(0).clip(1e-6)                    # per-out absmean (мягкое int8)
+    sh = np.abs(Wt).max(0).clip(1e-6)                     # per-out absmax (numpy: Δ+0.0009 ната!)
     q8 = np.clip(np.rint(Wt / sh[None, :] * 127), -127, 127).astype(np.int8)
     add("Et", np.ascontiguousarray(q8), 2); add("Et.s", (sh / 127).astype(np.float16), 3)
 else:
