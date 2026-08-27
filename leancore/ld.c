@@ -13,7 +13,7 @@
 
 typedef struct { char name[64]; uint8_t dt; uint32_t nd; uint32_t dims[4]; void* data; } Tensor;
 static Tensor TENS[256]; static int NT = 0;
-static uint32_t L, D, V, T; static float TAU; static int QQ8 = 0; static int QQ8MASK = 7;
+static uint32_t L, D, V, T; static float TAU; static int QQ8 = 0;
 
 static inline float f16(uint16_t h) {
     int s = (h >> 15) & 1, e = (h >> 10) & 31; uint32_t m = h & 1023; float f;
@@ -151,7 +151,7 @@ static void step(const int tok, float* x /*D*/) {
             y[j] = h[j] * f16(sc[j]);
         }
         snprintf(nm, 72, "b%u.Wm", l);
-        if (QQ8 && (QQ8MASK & 1)) mat_qq8(y, find(nm), mix, D, D); else mat_q(y, find(nm), mix, D, D);
+        if (QQ8) mat_qq8(y, find(nm), mix, D, D); else mat_q(y, find(nm), mix, D, D);
         for (uint32_t j = 0; j < D; j++) h2[j] = x[j] + g * mix[j];
         memcpy(y, h2, D * 4);
         snprintf(nm, 72, "b%u.ln2", l); const uint16_t* g2 = find(nm)->data;
@@ -159,19 +159,87 @@ static void step(const int tok, float* x /*D*/) {
         lnrow(y, g2, b2);
         uint32_t F = QQ8 ? find("b0.fc1")->dims[0] : find("b0.fc1")->dims[1];
         snprintf(nm, 72, "b%u.fc1", l);
-        if (QQ8 && (QQ8MASK & 2)) mat_qq8(y, find(nm), f1, D, F); else mat_q(y, find(nm), f1, D, F);
+        if (QQ8) mat_qq8(y, find(nm), f1, D, F); else mat_q(y, find(nm), f1, D, F);
         for (uint32_t j = 0; j < F; j++) f1[j] = gelu(f1[j]);
         snprintf(nm, 72, "b%u.fc2", l);
-        if (QQ8 && (QQ8MASK & 4)) mat_qq8(f1, find(nm), o, F, D); else mat_q(f1, find(nm), o, F, D);
+        if (QQ8) mat_qq8(f1, find(nm), o, F, D); else mat_q(f1, find(nm), o, F, D);
         for (uint32_t j = 0; j < D; j++) x[j] = h2[j] + g * o[j];
     }
     TT++;
 }
 // голова int8×int8: активации квантуются динамически (absmax→127), качество ≡ fp32 (numpy: Δ+0.0004 ната)
+// голова int4: nibbles q+8; x раскладывается на чёт/нечет потоки один раз на токен.
+static void logits_head4(const float* z, float* lg) {
+    const uint8_t* P = find("Et4")->data;                 // (V, D/2)
+    const uint16_t* so = find("Et4.s")->data;
+    const int32_t* qs = find("Et4.qsum")->data;
+    float ax = 0.f; for (uint32_t i = 0; i < D; i++) { float a = fabsf(z[i]); if (a > ax) ax = a; }
+    float sx = ax > 0 ? ax / 127.f : 1.f;
+    static uint8_t xe[2048], xo[2048]; int32_t xsum = 0;
+    const uint32_t H = D / 2;
+    for (uint32_t i = 0; i < H; i++) {
+        int ce = (int)lrintf(z[2*i]   / sx) + 128;
+        int co = (int)lrintf(z[2*i+1] / sx) + 128;
+        xe[i] = (uint8_t)ce; xo[i] = (uint8_t)co; xsum += ce + co;
+    }
+    fprintf(stderr, "head4 D=%u H=%u xsum=%d so=%p qs=%p P=%p\n", (unsigned)D, (unsigned)H, xsum, (void*)so, (void*)qs, (void*)P);
+    const __m512i m0f = _mm512_set1_epi8(0x0f);
+    if (H % 64 == 0) {
+        uint32_t v = 0;
+        for (; v + 4 <= V; v += 4) {
+            const uint8_t* p0 = P + (size_t)(v+0)*H; const uint8_t* p1 = P + (size_t)(v+1)*H;
+            const uint8_t* p2 = P + (size_t)(v+2)*H; const uint8_t* p3 = P + (size_t)(v+3)*H;
+            __m512i a0 = _mm512_setzero_si512(), a1 = a0, a2 = a0, a3 = a0;
+            const __m512i ones = _mm512_set1_epi16(1);
+            for (uint32_t c = 0; c < H; c += 64) {
+                __m512i be = _mm512_loadu_si512((const void*)(xe + c));
+                __m512i bo = _mm512_loadu_si512((const void*)(xo + c));
+                __m512i w0 = _mm512_loadu_si512((const void*)(p0+c));
+                __m512i w1 = _mm512_loadu_si512((const void*)(p1+c));
+                __m512i w2 = _mm512_loadu_si512((const void*)(p2+c));
+                __m512i w3 = _mm512_loadu_si512((const void*)(p3+c));
+                a0 = _mm512_add_epi32(a0, _mm512_madd_epi16(_mm512_add_epi16(_mm512_maddubs_epi16(be, _mm512_and_si512(w0, m0f)), _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w0, 4), m0f))), ones));
+                a1 = _mm512_add_epi32(a1, _mm512_madd_epi16(_mm512_add_epi16(_mm512_maddubs_epi16(be, _mm512_and_si512(w1, m0f)), _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w1, 4), m0f))), ones));
+                a2 = _mm512_add_epi32(a2, _mm512_madd_epi16(_mm512_add_epi16(_mm512_maddubs_epi16(be, _mm512_and_si512(w2, m0f)), _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w2, 4), m0f))), ones));
+                a3 = _mm512_add_epi32(a3, _mm512_madd_epi16(_mm512_add_epi16(_mm512_maddubs_epi16(be, _mm512_and_si512(w3, m0f)), _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w3, 4), m0f))), ones));
+            }
+            lg[v+0] = (float)(_mm512_reduce_add_epi32(a0) - 8*xsum - 128*qs[v+0]) * (sx * f16(so[v+0]));
+            lg[v+1] = (float)(_mm512_reduce_add_epi32(a1) - 8*xsum - 128*qs[v+1]) * (sx * f16(so[v+1]));
+            lg[v+2] = (float)(_mm512_reduce_add_epi32(a2) - 8*xsum - 128*qs[v+2]) * (sx * f16(so[v+2]));
+            lg[v+3] = (float)(_mm512_reduce_add_epi32(a3) - 8*xsum - 128*qs[v+3]) * (sx * f16(so[v+3]));
+        }
+        for (; v < V; v++) {
+            const uint8_t* p = P + (size_t)v*H;
+            __m512i acc = _mm512_setzero_si512();
+            const __m512i ones = _mm512_set1_epi16(1);
+            for (uint32_t c = 0; c < H; c += 64) {
+                __m512i w = _mm512_loadu_si512((const void*)(p+c));
+                __m512i be = _mm512_loadu_si512((const void*)(xe + c));
+                __m512i bo = _mm512_loadu_si512((const void*)(xo + c));
+                acc = _mm512_add_epi32(acc, _mm512_madd_epi16(_mm512_add_epi16(
+                    _mm512_maddubs_epi16(be, _mm512_and_si512(w, m0f)),
+                    _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w, 4), m0f))), ones));
+            }
+            lg[v] = (float)(_mm512_reduce_add_epi32(acc) - 8*xsum - 128*qs[v]) * (sx * f16(so[v]));
+        }
+    } else {
+        for (uint32_t v = 0; v < V; v++) {
+            const uint8_t* p = P + (size_t)v*H;
+            int32_t dot = -8 * xsum - 128 * qs[v];
+            for (uint32_t i = 0; i < H; i++) {
+                uint8_t b = p[i];
+                dot += (int)xe[i] * (int)(b & 15) + (int)xo[i] * (int)(b >> 4);
+            }
+            lg[v] = (float)dot * sx * f16(so[v]);
+        }
+    }
+}
+
 static void logits_of(const float* x, float* lg /*V*/) {
     static float z[1024];
     memcpy(z, x, D * 4);
     lnrow(z, find("lnf")->data, find("lnf.bias")->data);
+    if (find0("Et4")) { logits_head4(z, lg); return; }
     float ax = 0.f; for (uint32_t i = 0; i < D; i++) { float a = fabsf(z[i]); if (a > ax) ax = a; }
     float sx = ax > 0 ? ax / 127.f : 1.f;
     static uint8_t xq[1024];
@@ -181,18 +249,26 @@ static void logits_of(const float* x, float* lg /*V*/) {
     const uint16_t* so = find("EtT.s")->data;
     const int32_t* qs = find("EtT.qsum")->data;
     if (D % 64 == 0) {
-        for (uint32_t v = 0; v < V; v++) {
-            const int8_t* qrow = Q + (size_t)v * D;
-            __m512i acc = _mm512_setzero_si512();
+        uint32_t v = 0;
+        for (; v + 4 <= V; v += 4) {
+            const int8_t* q0 = Q + (size_t)(v+0)*D; const int8_t* q1 = Q + (size_t)(v+1)*D;
+            const int8_t* q2 = Q + (size_t)(v+2)*D; const int8_t* q3 = Q + (size_t)(v+3)*D;
+            __m512i a0 = _mm512_setzero_si512(), a1 = a0, a2 = a0, a3 = a0;
+            const __m512i ones = _mm512_set1_epi16(1);
             for (uint32_t c = 0; c < D; c += 64) {
                 __m512i xb = _mm512_loadu_si512((const void*)(xq + c));
-                __m512i qb = _mm512_loadu_si512((const void*)(qrow + c));
-                __m512i pr = _mm512_maddubs_epi16(xb, qb);          // u8×i8 → i16 попарные
-                acc = _mm512_add_epi32(acc, _mm512_madd_epi16(pr, _mm512_set1_epi16(1)));
+                a0 = _mm512_add_epi32(a0, _mm512_madd_epi16(_mm512_maddubs_epi16(xb, _mm512_loadu_si512((const void*)(q0+c))), ones));
+                a1 = _mm512_add_epi32(a1, _mm512_madd_epi16(_mm512_maddubs_epi16(xb, _mm512_loadu_si512((const void*)(q1+c))), ones));
+                a2 = _mm512_add_epi32(a2, _mm512_madd_epi16(_mm512_maddubs_epi16(xb, _mm512_loadu_si512((const void*)(q2+c))), ones));
+                a3 = _mm512_add_epi32(a3, _mm512_madd_epi16(_mm512_maddubs_epi16(xb, _mm512_loadu_si512((const void*)(q3+c))), ones));
             }
-            int32_t dot = _mm512_reduce_add_epi32(acc) - 128 * qs[v];
-            lg[v] = (float)dot * sx * f16(so[v]);
+            lg[v+0] = (float)(_mm512_reduce_add_epi32(a0) - 128*qs[v+0]) * (sx * f16(so[v+0]));
+            lg[v+1] = (float)(_mm512_reduce_add_epi32(a1) - 128*qs[v+1]) * (sx * f16(so[v+1]));
+            lg[v+2] = (float)(_mm512_reduce_add_epi32(a2) - 128*qs[v+2]) * (sx * f16(so[v+2]));
+            lg[v+3] = (float)(_mm512_reduce_add_epi32(a3) - 128*qs[v+3]) * (sx * f16(so[v+3]));
         }
+        for (; v < V; v++)
+            lg[v] = (float)(dot8_u8(xq, Q + (size_t)v*D, D) - 128*qs[v]) * (sx * f16(so[v]));
     } else {                                             // откат: плотный скаляр
         for (uint32_t v = 0; v < V; v++) {
             const int8_t* qrow = Q + (size_t)v * D;
@@ -216,11 +292,13 @@ int main(int argc, char** argv) {
         Tensor* t = &TENS[i]; fread(t->name, 1, nl, f); t->name[nl] = 0;
         fread(&t->dt, 1, 1, f); fread(&t->nd, 4, 1, f); fread(t->dims, 4, t->nd, f);
         size_t bytes = 1; for (uint32_t j = 0; j < t->nd; j++) bytes *= t->dims[j];
-        bytes *= (t->dt == 2 ? 1 : (t->dt == 0 ? 4 : 2));
-        t->data = malloc(bytes); fread(t->data, 1, bytes, f);
+        bytes *= ((t->dt == 2 || t->dt == 4) ? 1 : (t->dt == 0 ? 4 : 2));
+        fprintf(stderr, "rec %d %s dt=%d nd=%u d0=%u d1=%u bytes=%zu\n", i, t->name, t->dt, t->nd, t->dims[0], t->dims[1], bytes);
+        t->data = malloc(bytes); size_t rd = fread(t->data, 1, bytes, f);
+        if (rd != bytes) { fprintf(stderr, "SHORT %zu/%zu\n", rd, bytes); return 1; }
     }
     fclose(f);
-    { const char* m = getenv("QQ8MASK"); if (m) QQ8MASK = atoi(m); } QQ8 = getenv("QQ8OFF") ? 0 : (find0("b0.Wm.qs") != NULL);
+    QQ8 = find0("b0.Wm.qs") != NULL;
     fprintf(stderr, "QQ8=%d\n", QQ8);
     for (uint32_t l = 0; l < L; l++) HSTATE[l] = malloc(D * 4);
     static float x[1024]; static float* lg = NULL; lg = malloc(V * 4);

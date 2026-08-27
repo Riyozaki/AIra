@@ -168,10 +168,77 @@ static void step(const int tok, float* x /*D*/) {
     TT++;
 }
 // голова int8×int8: активации квантуются динамически (absmax→127), качество ≡ fp32 (numpy: Δ+0.0004 ната)
+// голова int4: nibbles q+8; x раскладывается на чёт/нечет потоки один раз на токен.
+static void logits_head4(const float* z, float* lg) {
+    const uint8_t* P = find("Et4")->data;                 // (V, D/2)
+    const uint16_t* so = find("Et4.s")->data;
+    const int32_t* qs = find("Et4.qsum")->data;
+    float ax = 0.f; for (uint32_t i = 0; i < D; i++) { float a = fabsf(z[i]); if (a > ax) ax = a; }
+    float sx = ax > 0 ? ax / 127.f : 1.f;
+    static uint8_t xe[2048], xo[2048]; int32_t xsum = 0;
+    const uint32_t H = D / 2;
+    for (uint32_t i = 0; i < H; i++) {
+        int ce = (int)lrintf(z[2*i]   / sx) + 128;
+        int co = (int)lrintf(z[2*i+1] / sx) + 128;
+        xe[i] = (uint8_t)ce; xo[i] = (uint8_t)co; xsum += ce + co;
+    }
+    const __m512i m0f = _mm512_set1_epi8(0x0f);
+    if (H % 64 == 0) {
+        uint32_t v = 0;
+        for (; v + 4 <= V; v += 4) {
+            const uint8_t* p0 = P + (size_t)(v+0)*H; const uint8_t* p1 = P + (size_t)(v+1)*H;
+            const uint8_t* p2 = P + (size_t)(v+2)*H; const uint8_t* p3 = P + (size_t)(v+3)*H;
+            __m512i a0 = _mm512_setzero_si512(), a1 = a0, a2 = a0, a3 = a0;
+            const __m512i ones = _mm512_set1_epi16(1);
+            for (uint32_t c = 0; c < H; c += 64) {
+                __m512i be = _mm512_loadu_si512((const void*)(xe + c));
+                __m512i bo = _mm512_loadu_si512((const void*)(xo + c));
+                __m512i w0 = _mm512_loadu_si512((const void*)(p0+c));
+                __m512i w1 = _mm512_loadu_si512((const void*)(p1+c));
+                __m512i w2 = _mm512_loadu_si512((const void*)(p2+c));
+                __m512i w3 = _mm512_loadu_si512((const void*)(p3+c));
+                a0 = _mm512_add_epi32(a0, _mm512_madd_epi16(_mm512_add_epi16(_mm512_maddubs_epi16(be, _mm512_and_si512(w0, m0f)), _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w0, 4), m0f))), ones));
+                a1 = _mm512_add_epi32(a1, _mm512_madd_epi16(_mm512_add_epi16(_mm512_maddubs_epi16(be, _mm512_and_si512(w1, m0f)), _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w1, 4), m0f))), ones));
+                a2 = _mm512_add_epi32(a2, _mm512_madd_epi16(_mm512_add_epi16(_mm512_maddubs_epi16(be, _mm512_and_si512(w2, m0f)), _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w2, 4), m0f))), ones));
+                a3 = _mm512_add_epi32(a3, _mm512_madd_epi16(_mm512_add_epi16(_mm512_maddubs_epi16(be, _mm512_and_si512(w3, m0f)), _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w3, 4), m0f))), ones));
+            }
+            lg[v+0] = (float)(_mm512_reduce_add_epi32(a0) - 8*xsum - 128*qs[v+0]) * (sx * f16(so[v+0]));
+            lg[v+1] = (float)(_mm512_reduce_add_epi32(a1) - 8*xsum - 128*qs[v+1]) * (sx * f16(so[v+1]));
+            lg[v+2] = (float)(_mm512_reduce_add_epi32(a2) - 8*xsum - 128*qs[v+2]) * (sx * f16(so[v+2]));
+            lg[v+3] = (float)(_mm512_reduce_add_epi32(a3) - 8*xsum - 128*qs[v+3]) * (sx * f16(so[v+3]));
+        }
+        for (; v < V; v++) {
+            const uint8_t* p = P + (size_t)v*H;
+            __m512i acc = _mm512_setzero_si512();
+            const __m512i ones = _mm512_set1_epi16(1);
+            for (uint32_t c = 0; c < H; c += 64) {
+                __m512i w = _mm512_loadu_si512((const void*)(p+c));
+                __m512i be = _mm512_loadu_si512((const void*)(xe + c));
+                __m512i bo = _mm512_loadu_si512((const void*)(xo + c));
+                acc = _mm512_add_epi32(acc, _mm512_madd_epi16(_mm512_add_epi16(
+                    _mm512_maddubs_epi16(be, _mm512_and_si512(w, m0f)),
+                    _mm512_maddubs_epi16(bo, _mm512_and_si512(_mm512_srli_epi16(w, 4), m0f))), ones));
+            }
+            lg[v] = (float)(_mm512_reduce_add_epi32(acc) - 8*xsum - 128*qs[v]) * (sx * f16(so[v]));
+        }
+    } else {
+        for (uint32_t v = 0; v < V; v++) {
+            const uint8_t* p = P + (size_t)v*H;
+            int32_t dot = -8 * xsum - 128 * qs[v];
+            for (uint32_t i = 0; i < H; i++) {
+                uint8_t b = p[i];
+                dot += (int)xe[i] * (int)(b & 15) + (int)xo[i] * (int)(b >> 4);
+            }
+            lg[v] = (float)dot * sx * f16(so[v]);
+        }
+    }
+}
+
 static void logits_of(const float* x, float* lg /*V*/) {
     static float z[1024];
     memcpy(z, x, D * 4);
     lnrow(z, find("lnf")->data, find("lnf.bias")->data);
+    if (find0("Et4")) { logits_head4(z, lg); return; }
     float ax = 0.f; for (uint32_t i = 0; i < D; i++) { float a = fabsf(z[i]); if (a > ax) ax = a; }
     float sx = ax > 0 ? ax / 127.f : 1.f;
     static uint8_t xq[1024];
@@ -224,7 +291,7 @@ int main(int argc, char** argv) {
         Tensor* t = &TENS[i]; fread(t->name, 1, nl, f); t->name[nl] = 0;
         fread(&t->dt, 1, 1, f); fread(&t->nd, 4, 1, f); fread(t->dims, 4, t->nd, f);
         size_t bytes = 1; for (uint32_t j = 0; j < t->nd; j++) bytes *= t->dims[j];
-        bytes *= (t->dt == 2 ? 1 : (t->dt == 0 ? 4 : 2));
+        bytes *= ((t->dt == 2 || t->dt == 4) ? 1 : (t->dt == 0 ? 4 : 2));
         t->data = malloc(bytes); fread(t->data, 1, bytes, f);
     }
     fclose(f);
@@ -250,7 +317,7 @@ int main(int argc, char** argv) {
         printf("stream int8: %d tokens in %.3fs -> %.1f tok/s | body %.1f%% head %.1f%%\n",
                n, dt, n / dt, 100*T_BODY/dt, 100*T_HEAD/dt);
     } else if (!strcmp(argv[2], "ppl")) {
-        FILE* vf = fopen(argv[3], "rb");
+        FILE* vf = fopen(argv[3], "rb"); if (!vf) { fprintf(stderr, "cannot open %s\n", argv[3]); return 1; } if (!vf) { fprintf(stderr, "cannot open %s\n", argv[3]); return 1; }
         fseek(vf, 8, SEEK_SET); uint16_t hl; fread(&hl, 2, 1, vf); fseek(vf, 10 + hl, SEEK_SET);
         static uint16_t toks[1 << 20]; size_t m = fread(toks, 2, 1 << 20, vf); fclose(vf);
         double nll = 0; long cnt = 0; reset_states();

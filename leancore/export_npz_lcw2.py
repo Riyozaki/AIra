@@ -40,7 +40,17 @@ for i in range(L):
 
 add("E", d["E"].astype(np.float16), 3)
 add("pos", d["pos"].astype(np.float16), 3)
-if True or "--i8head" in sys.argv:
+if os.environ.get("HEAD4"):
+    Wt = d["E"].astype(np.float32).T
+    sh = np.abs(Wt).max(0).clip(1e-6)
+    q4 = np.clip(np.rint(Wt / sh[None, :] * 15), -7, 7).astype(np.int8)   # (D,V)
+    qT = np.ascontiguousarray(q4.T.copy())                                # (V,D)
+    nib = (qT.astype(np.int16) + 8).astype(np.uint8)
+    pack = (nib[:, 0::2] | (nib[:, 1::2] << 4)).copy()                    # (V, D/2)
+    add("Et4", pack, 4)
+    add("Et4.s", (sh / 15).astype(np.float16), 3)
+    add("Et4.qsum", qT.astype(np.int32).sum(1).astype(np.int32), 0)
+elif True or "--i8head" in sys.argv:
     Wt = d["E"].astype(np.float32).T                      # (D,V)
     sh = np.abs(Wt).max(0).clip(1e-6)                     # per-out absmax
     q8 = np.clip(np.rint(Wt / sh[None, :] * 127), -127, 127).astype(np.int8)
