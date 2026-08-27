@@ -1,0 +1,38 @@
+<html xmlns:py="http://genshi.edgewall.org/"
+  xmlns:xi="http://www.w3.org/2001/XInclude">
+  
+  <py:def function="page_title">Shakespeare's Works</py:def>
+
+  <div py:match="content">
+    <table border="1">
+    <thead>
+      <tr>
+        <th>
+          Title
+        </th>
+        <th>Author</th>
+        <th>Other Information</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr py:for="item in c.works_index">
+        <td>
+          <a href="${h.url_for(controller='text', action='view',
+            name=item.name, format='lineno')}">
+            ${item.title}</a>
+        </td>
+        <td>
+          ${item.creator}
+        </td>
+        <td>
+          <a href="${h.url_for(controller='stats', action='text',
+            id=item.name)}">
+            Text statistics link</a>. ${item.notes}
+        </td>
+      </tr>
+    </tbody>
+    </table>
+  </div>
+
+  <xi:include href="../layout.html" />
+</html>

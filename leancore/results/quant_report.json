@@ -1,0 +1,10 @@
+{
+  "ppl_fp32_lean": 159.71,
+  "ppl_ternary_zeroshot": 400.75,
+  "ppl_ternary_qat": 174.05,
+  "converted_linears": 17,
+  "fp32_ckpt_bytes": 18276108,
+  "ternary_packed_bytes": 3898542,
+  "ternary_ideal_158b_bytes": 594585,
+  "compression_vs_fp32": 4.7
+}

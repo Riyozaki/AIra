@@ -1,0 +1,4 @@
+Pylons>=0.9.6.1
+SQLObject>=0.6
+Genshi>=0.3
+pygooglechart>=0.2,<0.3

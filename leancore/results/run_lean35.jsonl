@@ -1,0 +1,15 @@
+{"step": 0, "train_loss": 9.0271, "val_loss": 9.0224, "val_ppl": 8286.83, "wall": 2.2, "tok_s": 1067.1, "tokens": 2304, "lr": 9.999999999999999e-06}
+{"step": 50, "train_loss": 6.498, "val_loss": 6.4189, "val_ppl": 613.34, "wall": 30.1, "tok_s": 3909.9, "tokens": 117504, "lr": 0.0005099999999999999}
+{"step": 100, "train_loss": 5.9727, "val_loss": 5.8017, "val_ppl": 330.87, "wall": 57.9, "tok_s": 4017.2, "tokens": 232704, "lr": 0.0005948120257088722}
+{"step": 150, "train_loss": 5.6014, "val_loss": 5.5542, "val_ppl": 258.32, "wall": 86.7, "tok_s": 4011.2, "tokens": 347904, "lr": 0.0005740771091433297}
+{"step": 200, "train_loss": 5.4155, "val_loss": 5.412, "val_ppl": 224.07, "wall": 115.2, "tok_s": 4020.8, "tokens": 463104, "lr": 0.000538712822407939}
+{"step": 250, "train_loss": 5.4792, "val_loss": 5.3332, "val_ppl": 207.09, "wall": 143.2, "tok_s": 4037.9, "tokens": 578304, "lr": 0.000490838812212957}
+{"step": 300, "train_loss": 5.2758, "val_loss": 5.2824, "val_ppl": 196.85, "wall": 170.9, "tok_s": 4058.4, "tokens": 693504, "lr": 0.00043332452673857416}
+{"step": 350, "train_loss": 5.3271, "val_loss": 5.2581, "val_ppl": 192.11, "wall": 198.5, "tok_s": 4073.4, "tokens": 808704, "lr": 0.0003696172281029476}
+{"step": 400, "train_loss": 5.1074, "val_loss": 5.2245, "val_ppl": 185.77, "wall": 225.4, "tok_s": 4099.2, "tokens": 923904, "lr": 0.0003035353721110186}
+{"step": 450, "train_loss": 5.3075, "val_loss": 5.2131, "val_ppl": 183.67, "wall": 252.0, "tok_s": 4124.2, "tokens": 1039104, "lr": 0.00023903973958410059}
+{"step": 500, "train_loss": 5.1623, "val_loss": 5.1939, "val_ppl": 180.16, "wall": 278.6, "tok_s": 4143.1, "tokens": 1154304, "lr": 0.00017999603708470746}
+{"step": 550, "train_loss": 5.1707, "val_loss": 5.1812, "val_ppl": 177.89, "wall": 305.8, "tok_s": 4151.8, "tokens": 1269504, "lr": 0.0001299431961541611}
+{"step": 600, "train_loss": 5.0748, "val_loss": 5.1753, "val_ppl": 176.84, "wall": 332.5, "tok_s": 4164.4, "tokens": 1384704, "lr": 9.188125862594417e-05}
+{"step": 650, "train_loss": 5.1667, "val_loss": 5.1681, "val_ppl": 175.58, "wall": 359.2, "tok_s": 4175.7, "tokens": 1499904, "lr": 6.809156163747312e-05}
+{"step": 699, "train_loss": 5.0049, "val_loss": 5.1681, "val_ppl": 175.58, "wall": 385.1, "tok_s": 4188.2, "tokens": 1612800, "lr": 6.0003252914840636e-05}

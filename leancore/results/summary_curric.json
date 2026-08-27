@@ -1,0 +1,13 @@
+{
+  "tag": "curric",
+  "variant": "lean",
+  "params": 3033027,
+  "steps": 300,
+  "tokens": 691200,
+  "wall_s": 188.0,
+  "tok_s": 3675.8,
+  "peak_rss_mb": 875.1,
+  "flops_tok_fwd": 4190876,
+  "final_val_loss": 5.3568,
+  "final_val_ppl": 212.04
+}

@@ -1,0 +1,3 @@
+Use of this file is deprecated. Please use the trac installation at:
+
+  <http://project.knowledgeforge.net/shakespeare/trac/>

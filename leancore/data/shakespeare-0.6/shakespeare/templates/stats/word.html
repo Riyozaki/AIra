@@ -1,0 +1,43 @@
+<html xmlns:py="http://genshi.edgewall.org/"
+  xmlns:xi="http://www.w3.org/2001/XInclude">
+  
+  <py:def function="page_title">Stats for '${c.word}'</py:def>
+
+  <div py:match="content">
+    <img style="float: left;"
+      src="${c.img_url}"
+      alt="Word Statistics Bar Chart" />
+
+    <p py:if="not c.stats">
+      Sorry, no statistics are available for ${c.word} (NB: words are stemmed for stats purposes, so loved becomes love, bloody becomes blood etc).
+    </p>
+		<table>
+    <thead>
+      <tr>
+        <th>Index</th>
+        <th>
+          Text
+        </th>
+        <th>
+          Frequency
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr py:for="index, stat in enumerate(c.stats)">
+        <td>
+          ${index + 1}
+        </td>
+        <td>
+          ${stat.text.title}
+        </td>
+        <td>
+          ${stat.freq}
+        </td>
+      </tr>
+    </tbody>
+    </table>
+  </div>
+
+  <xi:include href="../layout.html" />
+</html>
