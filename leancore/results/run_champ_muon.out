@@ -1,0 +1,4 @@
+[champ_muon] init from results/ckpt_champ4krun.npz
+[champ_muon] nano-ema params=2,592,195
+[MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (12 шт), adam: 34 шт
+{"step": 0, "train_loss": 4.6771, "val_loss": 4.8707, "val_ppl": 130.42, "wall": 4.6, "tok_s": 500.5, "tokens": 2304}
