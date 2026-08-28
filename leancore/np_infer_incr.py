@@ -19,9 +19,9 @@ from nano_lc import NanoGPT, gelu, layernorm, linear, softmax_ce
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
-def load_model(ckpt, kind, adr):
+def load_model(ckpt, kind, adr, datadir="data/prep"):
     d = np.load(ckpt)
-    V = json.load(open(f"{ROOT}/data/prep/meta.json"))["vocab"]
+    V = json.load(open(f"{ROOT}/{datadir}/meta.json"))["vocab"]
     m = NanoGPT(V, kind=kind, adr_kf=adr)
     for k in m.p.d:
         if k in d.files:
@@ -92,13 +92,14 @@ def eval_ppl(m, inc, X, tau):
 def main():
     mode, ckpt, kind = sys.argv[1], sys.argv[2], sys.argv[3]
     adr = None if sys.argv[4] == "none" else float(sys.argv[4])
-    m = load_model(ckpt, kind, adr)
+    DD = sys.argv[5] if len(sys.argv) > 5 and sys.argv[4+1].startswith("data/") else "data/prep"
+    m = load_model(ckpt, kind, adr, DD.replace("../", ""))
     inc = Incr(m)
 
     if mode == "ppl":
         tau = 0.0
         if "--tau" in sys.argv: tau = float(sys.argv[sys.argv.index("--tau") + 1])
-        va = np.load(f"{ROOT}/data/prep/val.npy").astype(np.int64)
+        va = np.load(f"{ROOT}/{DD}/val.npy").astype(np.int64)
         X = va[:96 * 4]
         tot = 0.0; nch = 0
         for off in range(0, len(X) - 96 + 1, 96):

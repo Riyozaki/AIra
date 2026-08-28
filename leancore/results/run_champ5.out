@@ -1,3 +1,14 @@
 [champ5] nano-ema params=4,128,195
 [MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (12 шт), adam: 34 шт
 {"step": 0, "train_loss": 9.7172, "val_loss": 9.6662, "val_ppl": 15775.36, "wall": 2.4, "tok_s": 967.6, "tokens": 2304}
+{"step": 250, "train_loss": 5.2634, "val_loss": 5.5294, "val_ppl": 251.99, "wall": 159.6, "tok_s": 3622.9, "tokens": 578304}
+{"step": 500, "train_loss": 4.9028, "val_loss": 5.3677, "val_ppl": 214.38, "wall": 324.7, "tok_s": 3555.4, "tokens": 1154304}
+{"step": 750, "train_loss": 4.519, "val_loss": 5.2839, "val_ppl": 197.14, "wall": 488.9, "tok_s": 3539.1, "tokens": 1730304}
+{"step": 1000, "train_loss": 4.8674, "val_loss": 5.2295, "val_ppl": 186.71, "wall": 655.9, "tok_s": 3516.0, "tokens": 2306304}
+{"step": 1250, "train_loss": 4.743, "val_loss": 5.2018, "val_ppl": 181.59, "wall": 821.8, "tok_s": 3507.1, "tokens": 2882304}
+{"step": 1500, "train_loss": 4.6288, "val_loss": 5.1765, "val_ppl": 177.06, "wall": 985.9, "tok_s": 3507.7, "tokens": 3458304}
+{"step": 1750, "train_loss": 4.4886, "val_loss": 5.1644, "val_ppl": 174.94, "wall": 1146.1, "tok_s": 3520.0, "tokens": 4034304}
+{"step": 2000, "train_loss": 4.6969, "val_loss": 5.1422, "val_ppl": 171.09, "wall": 1309.6, "tok_s": 3520.3, "tokens": 4610304}
+{"step": 2250, "train_loss": 4.5285, "val_loss": 5.1334, "val_ppl": 169.6, "wall": 1472.3, "tok_s": 3522.6, "tokens": 5186304}
+{"step": 2499, "train_loss": 4.6328, "val_loss": 5.1154, "val_ppl": 166.57, "wall": 1633.8, "tok_s": 3525.5, "tokens": 5760000}
+SUMMARY {"tag": "champ5", "kind": "ema", "params": 4128195, "tokens": 5760000, "wall_s": 1633.8, "tok_s": 3525.5, "final_val_loss": 5.1154, "final_val_ppl": 166.57}
