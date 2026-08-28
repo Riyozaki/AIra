@@ -7,7 +7,7 @@ import os, sys, json, math, time
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import nano_lc
-from nano_lc import NanoGPT, AdamW, softmax_ce
+from nano_lc import NanoGPT, AdamW, MuonW, softmax_ce, layernorm
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PATS = (".fc1", ".fc2", ".Wm", ".qkv", ".Wqkv", ".Wo")
@@ -35,7 +35,13 @@ print(f"QAT targets: {len(targets)} matrices", flush=True)
 tr = np.load(f"{ROOT}/data/prep/train.npy").astype(np.int64)
 va = np.load(f"{ROOT}/data/prep/val.npy").astype(np.int64)
 rng = np.random.default_rng(123)
-opt = AdamW(m.p, lr=1.5e-4)
+opt = MuonW(m.p, lr=1.5e-4, mulr=0.0075) if "--muon" in sys.argv else AdamW(m.p, lr=1.5e-4)
+teacher = None
+if "--kl" in sys.argv:                       # Gemma-QAT рецепт: KL к fp32-исходнику
+    teacher = NanoGPT(8000, kind=kind, adr_kf=adr)
+    for k in teacher.p.d:
+        if k in d: teacher.p.d[k][...] = np.asarray(d[k], dtype=teacher.p.d[k].dtype)
+    print("QAT-KL: цель = fp32-учитель (T=2)", flush=True)
 
 def batch(arr, rr, B=24, T=96):
     st = rr.integers(0, len(arr) - T - 1, size=B)
@@ -60,6 +66,15 @@ for step in range(steps):
     x, y = batch(tr, rng)
     apply_q()
     H, c = m.forward(x); loss, dz = softmax_ce(m.logits(H), y)
+    if teacher is not None:
+        Ht, _ = teacher.forward(x)
+        lgt = Ht @ teacher.p.d["E"].T
+        zt = lgt / 2.0; q = np.exp(zt - zt.max(-1, keepdims=True)); q /= q.sum(-1, keepdims=True)
+        zs = m.logits(H) / 2.0; ps = np.exp(zs - zs.max(-1, keepdims=True)); ps /= ps.sum(-1, keepdims=True)
+        n = lg_n = y.size
+        kl = float((q * (np.log(q + 1e-12) - np.log(ps + 1e-12))).sum() / n)
+        dz = dz + 1.0 * 4.0 * (ps - q)
+        loss = loss + kl
     m.backward(H, c, dz)
     opt.step(1.5e-4)
     for k in targets:
