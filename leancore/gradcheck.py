@@ -127,8 +127,8 @@ def model_fd(tag, make):
     return worst, where
 
 # op-level: delta_mix (KDA-lite)
-worst = check_op("delta_mix", lambda x, th, sc, br: delta_mix(x, th, sc, br),
-                 lambda c, dy: delta_mix_bwd(c, dy), [(2, 6, 8), (8,), (8,), ()])
+worst = check_op("delta_mix", lambda x, th, sc, br, wg: delta_mix(x, th, sc, br, wg),
+                 lambda c, dy: delta_mix_bwd(c, dy), [(2, 6, 8), (8,), (8,), (), (8, 8)])
 results.append(("delta_mix", worst, "", worst < rel_tol))
 w, wh = model_fd("hybrid", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="hybrid"))
 results.append(("nanoGPT-hybrid", w, wh, w < 5e-4))

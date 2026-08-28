@@ -151,6 +151,7 @@ class NanoGPT:
                 p.add(f"b{i}.sc", (D,), init=lambda s: np.ones(s, f32))
                 if kind_i == "delta":
                     p.add(f"b{i}.braw", (), init=lambda s: np.array(-2.0, f32))   # β(0)=0.119 — мягкая коррекция
+                    p.add(f"b{i}.Wg", (D, D))                                      # KDA output gate
                 p.add(f"b{i}.Wm", (D, D))
             p.add(f"b{i}.ln2g", (D,), init=lambda s: np.ones(s, f32))
             p.add(f"b{i}.ln2b", (D,), init=lambda s: np.zeros(s, f32))
@@ -179,7 +180,7 @@ class NanoGPT:
         if b["kind"] == "attn":
             mix, c["attn"] = attention(ln_out, p[f"b{i}.Wqkv"], p[f"b{i}.Wo"], self.h)
         elif b["kind"] == "delta":
-            em, c["ema"] = delta_mix(ln_out, p[f"b{i}.th"], p[f"b{i}.sc"], p[f"b{i}.braw"])
+            em, c["ema"] = delta_mix(ln_out, p[f"b{i}.th"], p[f"b{i}.sc"], p[f"b{i}.braw"], p[f"b{i}.Wg"])
             mix, c["wm"] = linear(em, p[f"b{i}.Wm"])
         else:
             em, c["ema"] = ema_mix(ln_out, p[f"b{i}.th"], p[f"b{i}.sc"])
@@ -215,8 +216,8 @@ class NanoGPT:
             g[f"b{i}.Wqkv"] += dWqkv; g[f"b{i}.Wo"] += dWo
         elif b["kind"] == "delta":
             dxe, dWm = linear_bwd(c["wm"], dmix); g[f"b{i}.Wm"] += dWm
-            dxm, dth, dsc, dbraw = delta_mix_bwd(c["ema"], dxe)
-            g[f"b{i}.th"] += dth; g[f"b{i}.sc"] += dsc; g[f"b{i}.braw"] += dbraw
+            dxm, dth, dsc, dbraw, dWg = delta_mix_bwd(c["ema"], dxe)
+            g[f"b{i}.th"] += dth; g[f"b{i}.sc"] += dsc; g[f"b{i}.braw"] += dbraw; g[f"b{i}.Wg"] += dWg
         else:
             dxe, dWm = linear_bwd(c["wm"], dmix); g[f"b{i}.Wm"] += dWm
             dxm, dth, dsc = ema_mix_bwd(c["ema"], dxe)
@@ -349,12 +350,13 @@ class MuonW:
 
 # ---------------------------------------------------------------- KDA-lite delta-миксер
 # S_0 = 0;  p = S·k;  u = v − p;  S ← Diag(a)·S + β·u⊗k;  o = a⊙p + β·u·‖k‖²   [k ≡ v ≡ y]
-def delta_mix(X, th, sc, braw):                # X (B,T,D) → (Y, cache); k = x/‖x‖, v = x
+def delta_mix(X, th, sc, braw, Wg):            # X (B,T,D) → (Y, cache); k = x/‖x‖, v = x
     a = 1.0 / (1.0 + np.exp(-th)); beta = 1.0 / (1.0 + np.exp(-braw))
     B, T, D = X.shape
     S = np.zeros((B, D, D), X.dtype)
     Y = np.empty_like(X)
     KN = np.empty((B, T), X.dtype)                # ‖x_t‖
+    GS = np.empty((B, T, D), X.dtype)
     P = np.empty_like(X); U = np.empty_like(X); N2 = np.empty((B, T), X.dtype)
     KK = np.empty_like(X)
     for t in range(T):                            # KDA-update, состояние не складируем (backward replay)
@@ -367,15 +369,19 @@ def delta_mix(X, th, sc, braw):                # X (B,T,D) → (Y, cache); k = x
         S = a[None, :, None] * S + beta * u[:, :, None] * k[:, None, :]
         o = a[None, :] * p_ + beta * u * n2[:, None]
         P[:, t] = p_; U[:, t] = u; N2[:, t] = n2; KK[:, t] = k; KN[:, t] = kn
-        Y[:, t] = o * sc
-    return Y, (X, KK, KN, P, U, N2, S, a, beta, sc)   # в кэше только S_T
+        Gt = 1.0 / (1.0 + np.exp(-(v @ Wg)))       # KDA output gate σ(xW_g), канальный
+        Y[:, t] = o * sc * Gt
+        GS[:, t] = Gt
+    return Y, (X, KK, KN, P, U, N2, S, a, beta, sc, GS, Wg)
 
 def delta_mix_bwd(c, dY):
-    X, KK, KN, P, U, N2, Sfin, a, beta, sc = c
+    X, KK, KN, P, U, N2, Sfin, a, beta, sc, GS, Wg = c
     B, T, D = X.shape
     dX = np.zeros_like(X); dth = np.zeros(D, X.dtype); dbeta = 0.0
-    dsc = (dY * (a[None, None, :] * P + beta * U * N2[:, :, None])).sum((0, 1))
-    dO = dY * sc
+    dWg = np.zeros_like(Wg)
+    dO_full = dY * sc * GS
+    dsc = (dY * (a[None, None, :] * P + beta * U * N2[:, :, None]) * GS).sum((0, 1))
+    dO = dO_full
     G = np.zeros((B, D, D), X.dtype)              # dL/dS_t
     da = np.zeros(D, X.dtype)
     Scur = Sfin
@@ -394,12 +400,17 @@ def delta_mix_bwd(c, dY):
         dp = dOt * a[None, :] - du
         dk = 2.0 * k * dn2[:, None] + beta * np.einsum('bij,bi->bj', G, u)
         dk_tot = dk + np.einsum('bij,bi->bj', S, dp)
-        dX[:, t] = du + (dk_tot - k * (dk_tot * k).sum(-1, keepdims=True)) / kn[:, None]
+        # выходной гейт: d/dy_raw = yō·sc·o·g(1−g); в X-токен через Wg
+        o_t = a[None, :] * p + beta * u * n2[:, None]
+        dgr = dY[:, t] * sc * o_t * GS[:, t] * (1 - GS[:, t])
+        dWg += (v.T @ dgr)                        # v = x_t сырой (B,D)·(B,D)
+        dX[:, t] += dgr @ Wg.T
+        dX[:, t] += du + (dk_tot - k * (dk_tot * k).sum(-1, keepdims=True)) / kn[:, None]
         G = a[None, :, None] * G + np.einsum('bi,bj->bij', dp, k)
         Scur = S
     dth = da * a * (1 - a)
     dbraw = np.array(dbeta * beta * (1 - beta), X.dtype)
-    return dX, dth, dsc, dbraw
+    return dX, dth, dsc, dbraw, dWg
 
 # ---------------------------------------------------------------- MoE-FFN (DeepSeek-style, aux-loss-free)
 MOE_STATS = {}                                   # running loads для bias-апдейта (не градиентно)
