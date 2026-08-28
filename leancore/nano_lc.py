@@ -131,8 +131,8 @@ def ema_mix_bwd(c, dY):
 
 # ---------------------------------------------------------------- model
 class NanoGPT:
-    def __init__(self, V, D=192, L=4, h=6, ff=576, T=96, kind="attn", adr_kf=None, moe_e=1):
-        self.V, self.D, self.L, self.h, self.T, self.ff, self.moe_e = V, D, L, h, T, ff, moe_e
+    def __init__(self, V, D=192, L=4, h=6, ff=576, T=96, kind="attn", adr_kf=None, moe_e=1, mtp_w=0.0):  # noqa
+        self.V, self.D, self.L, self.h, self.T, self.ff, self.moe_e, self.mtp_w = V, D, L, h, T, ff, moe_e, mtp_w
         self.kind, self.adr_kf = kind, adr_kf
         p = self.p = Params()
         p.add("E", (V, D)); p.add("pos", (T, D))
@@ -167,6 +167,10 @@ class NanoGPT:
                 p.add(f"b{i}.rb", (), init=lambda s: np.array(1.5, f32))
         p.add("lnfg", (D,), init=lambda s: np.ones(s, f32))
         p.add("lnfb", (D,), init=lambda s: np.zeros(s, f32))
+        if mtp_w > 0:
+            p.add("lnm_g", (D,), init=lambda s: np.ones(s, f32))
+            p.add("lnm_b", (D,), init=lambda s: np.zeros(s, f32))
+            p.add("Wmtp", (D, D))
 
     def _arm_forward(self, X2, i, b):
         """плечо блока: ln1 → mixer(+Wm/attn) → +resid → ln2 → ffn → delta=mix+o2"""
@@ -251,11 +255,12 @@ class NanoGPT:
 
     def logits(self, H): return H @ self.p.d["E"].T                   # tied head
 
-    def backward(self, H, caches, dlogits):
+    def backward(self, H, caches, dlogits, dH_aux=None):
         p, g = self.p.d, self.p.g
         ids, T, blocks_c, c_lnf = caches
         g["E"] += dlogits.reshape(-1, self.V).T @ H.reshape(-1, self.D)
         dH = dlogits @ p["E"]
+        if dH_aux is not None: dH = dH + dH_aux            # MTP: aux-градиент уровня H (после lnf)
         dH, dg, db = layernorm_bwd(c_lnf, dH); g["lnfg"] += dg; g["lnfb"] += db
         for i in reversed(range(self.L)):
             bc = blocks_c[i]; b = self.blocks[i]
@@ -449,7 +454,14 @@ def main():
     va = np.load(f"{ROOT}/{args.data}/val.npy").astype(np.int64)
     V = json.load(open(f"{ROOT}/{args.data}/meta.json"))["vocab"]
     rng = np.random.default_rng(42)
-    model = NanoGPT(V, kind=args.kind, adr_kf=args.adr, moe_e=args.moe)
+    model = NanoGPT(V, D=args.dim, L=args.layers, ff=args.ff, kind=args.kind, adr_kf=args.adr, moe_e=args.moe, mtp_w=args.mtp)
+    teacher = None
+    if args.distill:
+        teacher = NanoGPT(V)
+        td = np.load(args.distill)
+        for k in teacher.p.d:
+            if k in td.files: teacher.p.d[k][...] = td[k]
+        print(f"[{args.tag}] учитель {args.distill} загружен", flush=True)
     if args.initckpt:
         d0 = np.load(args.initckpt)
         for k in model.p.d:
@@ -484,7 +496,32 @@ def main():
         H, caches = model.forward(x)
         lg = model.logits(H)
         loss, dz = softmax_ce(lg, y)
-        model.backward(H, caches, dz)
+        if teacher is not None:
+            Ht, _ = teacher.forward(x)
+            lgt = Ht @ teacher.p.d["E"].T
+            zt = lgt / args.dtemp; q = np.exp(zt - zt.max(-1, keepdims=True)); q /= q.sum(-1, keepdims=True)
+            zs = lg / args.dtemp; ps = np.exp(zs - zs.max(-1, keepdims=True)); ps /= ps.sum(-1, keepdims=True)
+            n = lg.shape[0] * lg.shape[1]
+            kl = float((q * (np.log(q + 1e-12) - np.log(ps + 1e-12))).sum() / n)
+            dz = dz + args.dkl * (args.dtemp ** 2) * (ps - q)
+            loss = loss + args.dkl * kl
+        dH_aux = None
+        if args.mtp > 0:
+            y2 = np.concatenate([y[:, 1:], x[:, -1:]], axis=1)     # t+2 цель (последний — фиктив, вес 0)
+            zn, clnm = layernorm(H, model.p.d["lnm_g"], model.p.d["lnm_b"])
+            zm, cwm = linear(zn, model.p.d["Wmtp"])
+            lg2 = model.logits(zm)
+            loss2, dz2 = softmax_ce(lg2, y2)
+            dz2[:, -1] = 0                                        # фиктивная цель
+            loss = loss + args.mtp * loss2
+            dz_m = dz2 @ model.p.d["E"]                           # через tied-E
+            # точнее: lg2 = zm @ E.T → dE += dz2ᵀ·zm; dzm = dz2 @ E
+            model.p.g["E"] += args.mtp * dz2.reshape(-1, model.V).T @ zm.reshape(-1, model.D)
+            dzm = dz2 @ model.p.d["E"]
+            dzn, dWmtp = linear_bwd(cwm, args.mtp * dzm); model.p.g["Wmtp"] += dWmtp
+            dH_aux, dgm, dbm = layernorm_bwd(clnm, dzn)
+            model.p.g["lnm_g"] += dgm; model.p.g["lnm_b"] += dbm
+        model.backward(H, caches, dz, dH_aux=dH_aux)
         if args.moe > 1:
             for i in range(model.L):
                 be = model.p.d[f"b{i}.be"]
@@ -508,6 +545,11 @@ def ap_parse():
     ap.add_argument("--opt", choices=["adam", "muon"], default="adam")
     ap.add_argument("--mulr", type=float, default=0.02)
     ap.add_argument("--moe", type=int, default=1, help="E экспертов top-1 (DeepSeek aux-loss-free); 1 = dense FFN")
+    ap.add_argument("--mtp", type=float, default=0.0, help="вес MTP-aux головы t+2 (DeepSeek); 0 — выкл")
+    ap.add_argument("--dim", type=int, default=192); ap.add_argument("--layers", type=int, default=4)
+    ap.add_argument("--ff", type=int, default=576)
+    ap.add_argument("--distill", default=None, help="ckpt учителя (fp32 ema 192x4) для KL-дистилляции")
+    ap.add_argument("--dtemp", type=float, default=2.0); ap.add_argument("--dkl", type=float, default=0.5)
     ap.add_argument("--tag", required=True)
     ap.add_argument("--steps", type=int, default=500)
     ap.add_argument("--batch", type=int, default=24)
