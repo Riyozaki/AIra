@@ -24,16 +24,21 @@ class Params:
         for k in self.g: self.g[k][...] = 0
 
 # ---------------------------------------------------------------- core ops (fwd + hand-derived bwd)
-def gelu(x):                                   # tanh-approx gelu
-    k0 = 0.7978845608028654
-    u = k0 * (x + 0.044715 * x**3)
+def gelu(x):                                   # tanh-approx gelu, слито по памяти
+    c1 = np.float32(0.044715); c0 = np.float32(0.7978845608028654)
+    x2 = x * x
+    u = x2 * x; u *= c1; u += x; u *= c0
     t = np.tanh(u)
-    return 0.5 * x * (1 + t), (x, t)
-def gelu_bwd(c, dy):
-    x, t = c; k0 = 0.7978845608028654
-    u = k0 * (x + 0.044715 * x**3)
-    du = k0 * (1 + 3 * 0.044715 * x**2)
-    return dy * (0.5 * (1 + t) + 0.5 * x * (1 - t * t) * du)
+    y = t.copy(); y += np.float32(1.0); y *= x; y *= np.float32(0.5)
+    return y, (x, t)
+def gelu_bwd(c, dy):                           # dx = dy·(½(1+t) + ½x(1−t²)·k0(1+3c₁x²))
+    x, t = c
+    q = t.copy(); q *= t; q *= np.float32(-1.0); q += np.float32(1.0)   # 1−t²
+    x2 = x * x; x2 *= np.float32(3.0 * 0.044715); x2 += np.float32(1.0) # 1+3c₁x²
+    q *= x2; q *= np.float32(0.5 * 0.7978845608028654); q *= x          # ½k0·x·(1−t²)(1+3c₁x²)
+    r = t.copy(); r += np.float32(1.0); r *= np.float32(0.5); r += q
+    r *= dy
+    return r
 
 def layernorm(x, g, b, eps=1e-5):              # x: (...,N)
     N = x.shape[-1]
@@ -106,26 +111,40 @@ def attention_bwd(c, dY):
     dWqkv = X.reshape(-1, D).T @ dZ.reshape(-1, 3 * D)
     return dZ @ Wqkv.T, dWqkv, dWo
 
-def ema_mix(X, th, sc):                        # h_t = a·h_{t-1} + (1-a)·x_t; y = sc⊙h
-    a = 1.0 / (1.0 + np.exp(-th))
+_EMA_CACHE = {}                                   # (T,D,a) → M_forward, L_backward
+
+def _ema_mats(a, T, D, dt):
+    key = (T, D, a.tobytes(), dt)
+    got = _EMA_CACHE.get(key)
+    if got is not None: return got
+    if len(_EMA_CACHE) > 12: _EMA_CACHE.clear()   # a меняется каждый шаг → не копим
+    tt = np.arange(T)
+    dd = tt[:, None] - tt[None, :]                # t−k
+    mf = dd >= 0
+    ad = np.abs(dd)[:, :, None].astype(dt)
+    Pf = a[None, None, :] ** ad
+    M = Pf * mf[:, :, None] * (1.0 - a)[None, None, :]         # h_t = Σ_k a^{t−k}(1−a)x_k, k≤t
+    Lb = Pf * (dd <= 0)[:, :, None]                             # lam_t = Σ_s a^{s−t}·dH_s, s≥t
+    _EMA_CACHE[key] = (M, Lb)
+    return M, Lb
+
+def ema_mix(X, th, sc):                        # h_t = a·h_{t-1} + (1-a)·x_t; y = sc⊙h — поток в Σ-форме
+    a = (1.0 / (1.0 + np.exp(-th))).astype(X.dtype)
     B, T, D = X.shape
-    H = np.empty_like(X)
-    hprev = np.zeros((B, D), X.dtype)
-    for t in range(T):
-        hprev = a * hprev + (1.0 - a) * X[:, t]
-        H[:, t] = hprev
+    M, _ = _ema_mats(a, T, D, X.dtype)
+    H = np.einsum('tkd,bkd->btd', M, X, optimize=True)
     return H * sc, (X, H, a, sc)
+
 def ema_mix_bwd(c, dY):
     X, H, a, sc = c
+    B, T, D = X.shape
     dH = dY * sc
     dsc = (dY * H).sum(axis=(0, 1))
-    dX = np.empty_like(X); da = np.zeros(X.shape[2], X.dtype)
-    lam = np.zeros((X.shape[0], X.shape[2]), X.dtype)
-    for t in range(X.shape[1] - 1, -1, -1):
-        lam = dH[:, t] + a * lam
-        dX[:, t] = (1.0 - a) * lam
-        hprev = H[:, t - 1] if t > 0 else np.zeros_like(lam)
-        da += (lam * (hprev - X[:, t])).sum(0)
+    M, Lb = _ema_mats(a, T, D, X.dtype)
+    lam = np.einsum('tsd,bsd->btd', Lb, dH, optimize=True)       # lam_t = Σ_{s≥t} a^{s-t} dH_s
+    dX = (1.0 - a)[None, None, :] * lam
+    hp = np.zeros_like(H); hp[:, 1:] = H[:, :-1]                 # h_{t-1}
+    da = (lam * (hp - X)).sum((0, 1))
     dth = da * a * (1.0 - a)
     return dX, dth, dsc
 
