@@ -5,7 +5,8 @@ float64, ε=1e-6; шумовая полка: пропуск записей |num|
 import sys, numpy as np
 sys.path.insert(0, '.')
 from nano_lc import (gelu, gelu_bwd, layernorm, layernorm_bwd, linear, linear_bwd,
-                     attention, attention_bwd, ema_mix, ema_mix_bwd, softmax_ce, NanoGPT)
+                     attention, attention_bwd, ema_mix, ema_mix_bwd, softmax_ce, NanoGPT,
+                     delta_mix, delta_mix_bwd)
 
 abs_tol = 1e-8
 rel_tol = 5e-3
@@ -125,10 +126,16 @@ def model_fd(tag, make):
             if err > worst: worst, where = err, f"{tag}:{name}@{idx}"
     return worst, where
 
+# op-level: delta_mix (KDA-lite)
+worst = check_op("delta_mix", lambda x, th, sc, br: delta_mix(x, th, sc, br),
+                 lambda c, dy: delta_mix_bwd(c, dy), [(2, 6, 8), (8,), (8,), ()])
+results.append(("delta_mix", worst, "", worst < rel_tol))
 w, wh = model_fd("hybrid", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="hybrid"))
 results.append(("nanoGPT-hybrid", w, wh, w < 5e-4))
 w, wh = model_fd("ema+ADR", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="ema", adr_kf=0.5))
 results.append(("ema+ADR", w, wh, w < 5e-4))
+w, wh = model_fd("delta", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="delta"))
+results.append(("kda-delta", w, wh, w < 5e-4))
 
 ok_all = True
 for name, worst, where, ok in results:

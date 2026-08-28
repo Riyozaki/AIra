@@ -138,8 +138,9 @@ class NanoGPT:
         p.add("E", (V, D)); p.add("pos", (T, D))
         self.blocks = []
         for i in range(L):
-            kind_i = "attn" if (kind == "attn" or (kind == "hybrid" and i == 0)) else "ema"
+            kind_i = "attn" if (kind == "attn" or (kind == "hybrid" and i == 0)) else ("delta" if kind == "delta" else "ema")
             b = {"kind": kind_i, "routed": bool(adr_kf) and i > 0}
+            b["kind"] = kind_i
             self.blocks.append(b)
             p.add(f"b{i}.ln1g", (D,), init=lambda s: np.ones(s, f32))
             p.add(f"b{i}.ln1b", (D,), init=lambda s: np.zeros(s, f32))
@@ -148,6 +149,8 @@ class NanoGPT:
             else:
                 p.add(f"b{i}.th", (D,), init=lambda s: np.zeros(s, f32))     # a=σ(0)=0.5
                 p.add(f"b{i}.sc", (D,), init=lambda s: np.ones(s, f32))
+                if kind_i == "delta":
+                    p.add(f"b{i}.braw", (), init=lambda s: np.array(0.0, f32))
                 p.add(f"b{i}.Wm", (D, D))
             p.add(f"b{i}.ln2g", (D,), init=lambda s: np.ones(s, f32))
             p.add(f"b{i}.ln2b", (D,), init=lambda s: np.zeros(s, f32))
@@ -164,6 +167,9 @@ class NanoGPT:
         ln_out, c["ln1"] = layernorm(X2, p[f"b{i}.ln1g"], p[f"b{i}.ln1b"])
         if b["kind"] == "attn":
             mix, c["attn"] = attention(ln_out, p[f"b{i}.Wqkv"], p[f"b{i}.Wo"], self.h)
+        elif b["kind"] == "delta":
+            em, c["ema"] = delta_mix(ln_out, p[f"b{i}.th"], p[f"b{i}.sc"], p[f"b{i}.braw"])
+            mix, c["wm"] = linear(em, p[f"b{i}.Wm"])
         else:
             em, c["ema"] = ema_mix(ln_out, p[f"b{i}.th"], p[f"b{i}.sc"])
             mix, c["wm"] = linear(em, p[f"b{i}.Wm"])
@@ -187,6 +193,10 @@ class NanoGPT:
         if b["kind"] == "attn":
             dxm, dWqkv, dWo = attention_bwd(c["attn"], dmix)
             g[f"b{i}.Wqkv"] += dWqkv; g[f"b{i}.Wo"] += dWo
+        elif b["kind"] == "delta":
+            dxe, dWm = linear_bwd(c["wm"], dmix); g[f"b{i}.Wm"] += dWm
+            dxm, dth, dsc, dbraw = delta_mix_bwd(c["ema"], dxe)
+            g[f"b{i}.th"] += dth; g[f"b{i}.sc"] += dsc; g[f"b{i}.braw"] += dbraw
         else:
             dxe, dWm = linear_bwd(c["wm"], dmix); g[f"b{i}.Wm"] += dWm
             dxm, dth, dsc = ema_mix_bwd(c["ema"], dxe)
@@ -271,6 +281,50 @@ class AdamW:
             self.p.d[k] -= lr * (mh / (np.sqrt(vh) + self.eps) + self.wd * self.p.d[k])
         self.p.zero()
 
+class MuonW:
+    """Muon (Keller Jordan): momentum + Newton–Schulz ортогонализация для 2D-матриц (~35% к скорости NanoGPT).
+    1D/скаляры/эмбеддинг/pos остаются на Adam (стандартная практика)."""
+    NS_COEF = (3.4445, -4.7750, 2.0315)
+    def __init__(self, params, lr=6e-4, mulr=0.02, mom=0.95, wd=0.1, ns=5, eps=1e-8):
+        self.p = params; self.lr0, self.mulr, self.mom, self.wd, self.ns, self.eps = lr, mulr, mom, wd, ns, eps
+        self.muon_keys = {k for k, v in params.d.items()
+                          if v.ndim == 2 and min(v.shape) >= 16 and k not in ("E", "pos")}
+        self.adam_keys = set(params.d) - self.muon_keys
+        self.mb = {k: np.zeros_like(v) for k, v in params.d.items() if k in self.muon_keys}
+        self.m = {k: np.zeros_like(params.d[k]) for k in self.adam_keys}
+        self.v = {k: np.zeros_like(params.d[k]) for k in self.adam_keys}
+        self.t = 0
+        print(f"[MuonW] muon: {sorted(self.muon_keys)[:4]}... ({len(self.muon_keys)} шт), adam: {len(self.adam_keys)} шт", flush=True)
+    @staticmethod
+    def _ns5(G, steps, eps):
+        a, b, c = MuonW.NS_COEF
+        X = G / (np.linalg.norm(G.astype(np.float64)) + eps).astype(np.float32)
+        tr = X.shape[0] > X.shape[1]
+        if tr: X = X.T.copy()
+        for _ in range(steps):
+            A = X @ X.T
+            B = b * A + c * (A @ A)
+            X = a * X + B @ X
+        if tr: X = X.T
+        return X
+    def step(self, lr):
+        self.t += 1
+        for k in self.muon_keys:
+            g = self.p.g[k]
+            self.mb[k] = self.mom * self.mb[k] + (1 - self.mom) * g
+            gu = g * (1 - self.mom) + self.mom * self.mb[k]          # nesterov
+            o = self._ns5(gu, self.ns, self.eps)
+            scale = max(1.0, o.shape[0] / o.shape[1]) ** 0.5
+            self.p.d[k] -= self.mulr * scale * o + self.wd * lr * self.p.d[k]
+        for k in self.adam_keys:
+            g = self.p.g[k]
+            self.m[k] = 0.9 * self.m[k] + 0.1 * g
+            self.v[k] = 0.95 * self.v[k] + 0.05 * g * g
+            mh = self.m[k] / (1 - 0.9 ** self.t)
+            vh = self.v[k] / (1 - 0.95 ** self.t)
+            self.p.d[k] -= lr * (mh / (np.sqrt(vh) + self.eps) + self.wd * self.p.d[k])
+        self.p.zero()
+
 def main():
     args = ap_parse()
     tr = np.load(f"{ROOT}/{args.data}/train.npy").astype(np.int64)
@@ -285,7 +339,8 @@ def main():
         print(f"[{args.tag}] init from {args.initckpt}", flush=True)
     nparams = sum(v.size for v in model.p.d.values())
     print(f"[{args.tag}] nano-{args.kind} params={nparams:,}", flush=True)
-    opt = AdamW(model.p, lr=args.lr)
+    if args.opt == "muon": opt = MuonW(model.p, lr=args.lr, mulr=args.mulr)
+    else: opt = AdamW(model.p, lr=args.lr)
 
     def batch(ids, rr):
         st = rr.integers(0, len(ids) - args.ctx - 1, size=args.batch)
@@ -327,7 +382,9 @@ def main():
 
 def ap_parse():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--kind", choices=["attn", "ema", "hybrid"], required=True)
+    ap.add_argument("--kind", choices=["attn", "ema", "hybrid", "delta"], required=True)
+    ap.add_argument("--opt", choices=["adam", "muon"], default="adam")
+    ap.add_argument("--mulr", type=float, default=0.02)
     ap.add_argument("--tag", required=True)
     ap.add_argument("--steps", type=int, default=500)
     ap.add_argument("--batch", type=int, default=24)
@@ -342,3 +399,49 @@ def ap_parse():
 
 if __name__ == "__main__":
     main()
+
+# ---------------------------------------------------------------- KDA-lite delta-миксер
+# S_0 = 0;  p = S·k;  u = v − p;  S ← Diag(a)·S + β·u⊗k;  o = a⊙p + β·u·‖k‖²   [k ≡ v ≡ y]
+def delta_mix(X, th, sc, braw):                # X (B,T,D) → (Y, cache)
+    a = 1.0 / (1.0 + np.exp(-th)); beta = 1.0 / (1.0 + np.exp(-braw))
+    B, T, D = X.shape
+    S = np.zeros((B, D, D), X.dtype)
+    Y = np.empty_like(X)
+    P = np.empty_like(X); U = np.empty_like(X); N2 = np.empty((B, T), X.dtype)
+    SS = []                                       # состояния до апдейта (для backward)
+    for t in range(T):
+        k = X[:, t]                               # (B,D), k ≡ v
+        p_ = np.einsum('bij,bj->bi', S, k)
+        u = k - p_
+        SS.append(S)
+        n2 = (k * k).sum(-1)
+        S = a[None, :, None] * S + beta * u[:, :, None] * k[:, None, :]
+        o = a[None, :] * p_ + beta * u * n2[:, None]
+        P[:, t] = p_; U[:, t] = u; N2[:, t] = n2
+        Y[:, t] = o * sc
+    return Y, (X, P, U, N2, SS, a, beta, sc)
+
+def delta_mix_bwd(c, dY):
+    X, P, U, N2, SS, a, beta, sc = c
+    B, T, D = X.shape
+    dX = np.zeros_like(X); dth = np.zeros(D, X.dtype); dbeta = 0.0
+    dsc = (dY * (a[None, None, :] * P + beta * U * N2[:, :, None])).sum((0, 1))
+    dO = dY * sc
+    G = np.zeros((B, D, D), X.dtype)              # dL/dS_t
+    da = np.zeros(D, X.dtype)
+    for t in range(T - 1, -1, -1):
+        k = X[:, t]; p = P[:, t]; u = U[:, t]; n2 = N2[:, t]; S = SS[t]
+        dOt = dO[:, t]
+        da += (dOt * p).sum(0)
+        dbeta += float((dOt * u * n2[:, None]).sum())
+        dn2 = (dOt * (beta * u)).sum(-1)
+        da += (G * S).sum((0, 2))                                   # a через обновление S_t
+        dbeta += float((G * (u[:, :, None] * k[:, None, :])).sum())
+        du = dOt * beta * n2[:, None] + beta * np.einsum('bij,bj->bi', G, k)   # u: через o и через S_t
+        dp = dOt * a[None, :] - du                                  # p: через o и через u=k−p
+        dk = 2.0 * k * dn2[:, None] + beta * np.einsum('bij,bi->bj', G, u)
+        dX[:, t] = du + dk + np.einsum('bij,bi->bj', S, dp)         # v-path: du; k-paths: dk, dp через S
+        G = a[None, :, None] * G + np.einsum('bi,bj->bij', dp, k)
+    dth = da * a * (1 - a)
+    dbraw = np.array(dbeta * beta * (1 - beta), X.dtype)
+    return dX, dth, dsc, dbraw

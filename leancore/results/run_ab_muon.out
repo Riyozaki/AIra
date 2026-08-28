@@ -1,0 +1,9 @@
+[ab_muon] nano-ema params=2,592,195
+[MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (12 шт), adam: 34 шт
+{"step": 0, "train_loss": 9.0408, "val_loss": 8.9811, "val_ppl": 7951.18, "wall": 4.4, "tok_s": 521.3, "tokens": 2304}
+{"step": 50, "train_loss": 6.3597, "val_loss": 6.2944, "val_ppl": 541.54, "wall": 61.4, "tok_s": 1914.6, "tokens": 117504}
+{"step": 100, "train_loss": 5.6672, "val_loss": 5.4823, "val_ppl": 240.4, "wall": 119.2, "tok_s": 1952.4, "tokens": 232704}
+{"step": 150, "train_loss": 5.282, "val_loss": 5.2641, "val_ppl": 193.28, "wall": 183.9, "tok_s": 1891.7, "tokens": 347904}
+{"step": 200, "train_loss": 5.1537, "val_loss": 5.1582, "val_ppl": 173.85, "wall": 256.0, "tok_s": 1809.2, "tokens": 463104}
+{"step": 250, "train_loss": 5.245, "val_loss": 5.0952, "val_ppl": 163.23, "wall": 326.6, "tok_s": 1770.9, "tokens": 578304}
+{"step": 300, "train_loss": 5.0726, "val_loss": 5.0526, "val_ppl": 156.43, "wall": 399.9, "tok_s": 1734.2, "tokens": 693504}
