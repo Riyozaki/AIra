@@ -124,9 +124,15 @@ static void mat_qq8(const float* x, const Tensor* Qt, float* out, int in, int od
 
 
 static void step(const int tok, float* x /*D*/) {
-    const uint16_t* E = find("E")->data; const uint16_t* pos = find("pos")->data;
+    Tensor* Et = find("E"); const uint16_t* pos = find("pos")->data;
     if (TT >= (int)T) reset_states();
-    for (uint32_t j = 0; j < D; j++) x[j] = f16(E[tok * D + j]) + f16(pos[TT * D + j]);
+    if (Et->dt == 2) {                       // общая int8-E: deq на ходу
+        const int8_t* E8 = Et->data; float es = f16(((const uint16_t*)find("E.s")->data)[tok]);
+        for (uint32_t j = 0; j < D; j++) x[j] = (float)E8[tok * D + j] * es + f16(pos[TT * D + j]);
+    } else {
+        const uint16_t* E = Et->data;
+        for (uint32_t j = 0; j < D; j++) x[j] = f16(E[tok * D + j]) + f16(pos[TT * D + j]);
+    }
     static float y[1024], mix[1024], h2[1024], f1[4096], o[1024];
     for (uint32_t l = 0; l < L; l++) {
         char nm[72];
@@ -244,9 +250,13 @@ static void logits_of(const float* x, float* lg /*V*/) {
     static uint8_t xq[1024];
     __m512i sh = _mm512_set1_epi8(-128);
     for (uint32_t i = 0; i < D; i++) xq[i] = (uint8_t)((int)lrintf(z[i] / sx) + 128);
-    const int8_t* Q = find("EtT")->data;                 // (V,D) row-major
-    const uint16_t* so = find("EtT.s")->data;
-    const int32_t* qs = find("EtT.qsum")->data;
+    Tensor* hq = find0("EtT");
+    const char* hn = hq ? "EtT" : "E";       // shared-формат: голова = int8-строки E
+    const int8_t* Q = find(hn)->data;                 // (V,D) row-major
+    char nm8[72];
+    snprintf(nm8, 72, "%s.s", hn);  const uint16_t* so = find(nm8)->data;
+    snprintf(nm8, 72, hq ? "%s.qsum" : "%s.qs", hn);
+    const int32_t* qs = find(nm8)->data;
     if (D % 64 == 0) {
         uint32_t v = 0;
         for (; v + 4 <= V; v += 4) {

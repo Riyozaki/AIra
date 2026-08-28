@@ -38,7 +38,16 @@ for i in range(L):
         add(p + "rw", d[p + "rw"].astype(np.float16), 3)
         add(p + "rb", np.asarray(d[p + "rb"], np.float32).reshape(1).astype(np.float16), 3)
 
-add("E", d["E"].astype(np.float16), 3)
+SHARE8 = "--share8" in sys.argv
+if SHARE8:
+    Ef = d["E"].astype(np.float32)
+    es = (np.abs(Ef).max(1).clip(1e-8) / 127.0).astype(np.float16)          # per-row scale
+    qE = np.clip(np.rint(Ef / es.astype(np.float32)[:, None]), -127, 127).astype(np.int8)
+    add("E", np.ascontiguousarray(qE), 2)                                   # (V,D) int8
+    add("E.s", es, 3)
+    add("E.qs", qE.astype(np.int32).sum(1).astype(np.int32), 0)             # для u8-офсета головы
+else:
+    add("E", d["E"].astype(np.float16), 3)
 add("pos", d["pos"].astype(np.float16), 3)
 if os.environ.get("HEAD4"):
     Wt = d["E"].astype(np.float32).T
@@ -50,6 +59,8 @@ if os.environ.get("HEAD4"):
     add("Et4", pack, 4)
     add("Et4.s", (sh / 15).astype(np.float16), 3)
     add("Et4.qsum", qT.astype(np.int32).sum(1).astype(np.int32), 0)
+elif SHARE8:                              # EtT не нужна: голова читает строки int8-E
+    pass
 elif True or "--i8head" in sys.argv:
     Wt = d["E"].astype(np.float32).T                      # (D,V)
     sh = np.abs(Wt).max(0).clip(1e-6)                     # per-out absmax

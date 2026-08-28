@@ -1,0 +1,5 @@
+[champ3] nano-ema params=2,592,195
+[MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (12 шт), adam: 34 шт
+{"step": 0, "train_loss": 9.0304, "val_loss": 8.9771, "val_ppl": 7919.48, "wall": 1.9, "tok_s": 1182.0, "tokens": 2304}
+{"step": 200, "train_loss": 5.154, "val_loss": 5.1547, "val_ppl": 173.25, "wall": 98.1, "tok_s": 4722.4, "tokens": 463104}
+{"step": 400, "train_loss": 4.8568, "val_loss": 5.0021, "val_ppl": 148.72, "wall": 317.7, "tok_s": 2907.7, "tokens": 923904}
