@@ -16,14 +16,25 @@ f32 = torch.float32
 
 
 # ---------------------------------------------------------------- Muon (Keller Jordan)
+def _ns_dtype():
+    """bf16 только Ampere+ (sm_80). T4 sm_75 и P100 sm_60 аппаратно bf16 не умеют → fp32."""
+    if torch.cuda.is_available():
+        try:
+            if torch.cuda.get_device_capability(0) < (8, 0):
+                return torch.float32
+        except Exception:
+            pass
+    return torch.bfloat16
+
+
 @torch.no_grad()
 def zeropower_via_newtonschulz5(G, steps=5):
-    """Ортогонализация обновления, bf16-хвост допустим; форма (r,c)."""
+    """Ортогонализация обновления. Норма до транспонирования — как nano_lc.MuonW._ns5."""
     a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.to(torch.bfloat16)
+    X = G.to(_ns_dtype())
+    X = X / (X.norm() + 1e-7)
     transposed = G.size(0) > G.size(1)
     if transposed: X = X.mT
-    X = X / (X.norm() + 1e-7)
     for _ in range(steps):
         A = X @ X.mT
         B = b * A + c * A @ A

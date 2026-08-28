@@ -98,7 +98,7 @@ LeanCore — за 2.304М токенов и 628 с.
 | Чемпион v3 (2000 шагов muon, 4.6M ток) | fp32 val **122.33** (за ПОЛОВИНУ бюджета v1) → QAT-KL-400 **120.26**; C-поток PPL **104.65** (τ=0.4) | [изм.] |
 | Бывший чемпион (4000 шагов, 9.2M ток) | fp32 val 123.30 → ternary-QAT-KL 124.27; C-поток PPL 108.56 (τ=0.4) | [изм.] |
 | Потоковый инференс EMA v3 (int8×int8 maddubs) | **~5800 tok/s / ядро** (2.6 ГГц) vs numpy-окно 61.7 → **×94**; ×2.2 к первичному C int8 | [изм., чистые ядра] |
-| **Kaggle GPU (T4×2/P100)** | `leancore/kaggle/LeanCore_Kaggle.ipynb` — самодостаточный ноутбук: данные из репо → PyTorch-порт архитектуры (EMA 1:1 с numpy, params 2,592,195 совпали) → fp32 → QAT-KL → LCW2 share8 (72 recs, читается C-движком) | [изм.] |
+| **Kaggle GPU (T4×2/P100)** | `kaggle/LeanCore_Kaggle.ipynb`: Internet ON; `DATA_MODE=classic\|balanced\|full`; T4/P100 **без bf16** → NS5 fp32; T4×2 = 2 карты, DP выкл; сессия **≤9ч**; QAT-KL = `4·mean_token_KL` (= np_qat `+4(ps−q)/n`); LCW2 share8 | [изм.] |
 | Полный пакет чемпиона в файле | `results/champ3_qat_kl8.lcw2` = **2.56 МБ** (shared int8 E/head), живёт на :8080 | [изм.] |
 | char-fallback 4k @T=96 | word-PPL 1556 vs 425 у 8k | [отрицательный, показан честно] |
 | int8-голова | absmean — отклонено (баг скейлинга); **absmax — принято** (Δ+0.0009 ната) | [исправлено] |
