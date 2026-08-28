@@ -278,6 +278,27 @@ static void logits_of(const float* x, float* lg /*V*/) {
     }
 }
 
+
+static unsigned long long RNG = 0x9E3779B97F4A7C15ull;
+static float frand(void) { RNG ^= RNG << 13; RNG ^= RNG >> 7; RNG ^= RNG << 17; return (float)((RNG >> 11) * (1.0/9007199254740992.0)); }
+static int sample_lg(const float* lg, float temp, int topk) {
+    if (temp <= 1e-6f) { int best = 0; float bl = lg[0]; for (uint32_t j = 1; j < V; j++) if (lg[j] > bl) { bl = lg[j]; best = j; } return best; }
+    static float p[65536]; float mx = -1e30f;
+    for (uint32_t j = 0; j < V; j++) { p[j] = lg[j] / temp; if (p[j] > mx) mx = p[j]; }
+    float sm = 0; for (uint32_t j = 0; j < V; j++) { p[j] = expf(p[j] - mx); sm += p[j]; }
+    if (topk > 0 && (uint32_t)topk < V) {
+        // k-я по величине вероятность как порог (частичный отбор)
+        static float keys[65536]; memcpy(keys, p, V * 4);
+        for (int i = 0; i < topk; i++) { int bi = i; for (uint32_t j = i + 1; j < V; j++) if (keys[j] > keys[bi]) bi = j; float t = keys[i]; keys[i] = keys[bi]; keys[bi] = t; }
+        float thr = keys[topk - 1];
+        float sm2 = 0; for (uint32_t j = 0; j < V; j++) p[j] = (p[j] >= thr) ? p[j] : 0.f, sm2 += p[j];
+        sm = sm2;
+    }
+    float r = frand() * sm, acc = 0;
+    for (uint32_t j = 0; j < V; j++) { acc += p[j]; if (acc >= r && p[j] > 0) return j; }
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) { fprintf(stderr, "usage: lc_stream m.lcw2 <bench N | ppl file.npy>\n"); return 1; }
     FILE* f = fopen(argv[1], "rb"); if (!f) { fprintf(stderr, "cannot open %s\n", argv[1]); return 1; }
@@ -331,6 +352,32 @@ int main(int argc, char** argv) {
             nll += log(sm) + mx - lg[toks[ti + 1]]; cnt++;
         }
         printf("stream ppl = %.2f over %ld tokens\n", exp(nll / cnt), cnt);
+    } else if (!strcmp(argv[2], "chat")) {
+        // stdin-протокол (постоянное состояние): ".step <id>" | ".gen <n> <temp> <topk>" | ".reset"
+        setvbuf(stdout, NULL, _IOLBF, 0);
+        static float x[1024];
+        reset_states();
+        char cmd[64];
+        while (scanf("%63s", cmd) == 1) {
+            if (!strcmp(cmd, ".step")) {
+                int id; if (scanf("%d", &id) != 1) break;
+                step(id, x); printf("ok\n");
+            } else if (!strcmp(cmd, ".gen")) {
+                int n = 1; float temp = 0.f; int topk = 0;
+                scanf("%d %f %d", &n, &temp, &topk);
+                static float lg_[65536];
+                int cur = -1;
+                for (int i = 0; i < n; i++) {
+                    logits_of(x, lg_);
+                    cur = sample_lg(lg_, temp, topk);
+                    printf("%d ", cur);
+                    step(cur, x);
+                }
+                printf("\n");
+            } else if (!strcmp(cmd, ".reset")) { reset_states(); printf("ok\n"); }
+            else if (!strcmp(cmd, ".seed")) { unsigned long long s; scanf("%llu", &s); RNG = s; printf("ok\n"); }
+            else if (!strcmp(cmd, ".quit")) break;
+        }
     }
     return 0;
 }
