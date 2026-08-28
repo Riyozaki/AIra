@@ -29,7 +29,6 @@ class H(BaseHTTPRequestHandler):
             ENG.step([1] + tok(body.get("prompt", "")))
             ids = ENG.gen(int(body.get("max_tokens", 64)), float(body.get("temperature", 0.8)),
                           int(body.get("top_k", 40)))
-                          int(body.get("top_k", 40)))
         self._json(200, {"choices": [{"text": detok(ids), "finish_reason": "length"}],
                          "usage": {"completion_tokens": len(ids)}})
 
