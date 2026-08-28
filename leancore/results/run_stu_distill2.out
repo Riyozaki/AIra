@@ -1,0 +1,4 @@
+[stu_distill2] учитель results/ckpt_champ4krun.npz загружен
+[stu_distill2] nano-ema params=1,383,170
+[MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (9 шт), adam: 26 шт
+{"step": 0, "train_loss": 9.2203, "val_loss": 8.9899, "val_ppl": 8021.4, "wall": 3.9, "tok_s": 588.7, "tokens": 2304}

@@ -71,9 +71,9 @@ for step in range(steps):
         lgt = Ht @ teacher.p.d["E"].T
         zt = lgt / 2.0; q = np.exp(zt - zt.max(-1, keepdims=True)); q /= q.sum(-1, keepdims=True)
         zs = m.logits(H) / 2.0; ps = np.exp(zs - zs.max(-1, keepdims=True)); ps /= ps.sum(-1, keepdims=True)
-        n = lg_n = y.size
+        n = y.size
         kl = float((q * (np.log(q + 1e-12) - np.log(ps + 1e-12))).sum() / n)
-        dz = dz + 1.0 * 4.0 * (ps - q)
+        dz = dz + 4.0 * (ps - q) / n
         loss = loss + kl
     m.backward(H, c, dz)
     opt.step(1.5e-4)

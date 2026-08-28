@@ -1,3 +1,12 @@
 [stu_scratch] nano-ema params=1,383,170
 [MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (9 шт), adam: 26 шт
 {"step": 0, "train_loss": 9.0158, "val_loss": 8.9858, "val_ppl": 7989.14, "wall": 2.8, "tok_s": 816.2, "tokens": 2304}
+{"step": 50, "train_loss": 7.056, "val_loss": 6.9728, "val_ppl": 1067.17, "wall": 36.6, "tok_s": 3213.5, "tokens": 117504}
+{"step": 100, "train_loss": 5.959, "val_loss": 5.7711, "val_ppl": 320.9, "wall": 69.4, "tok_s": 3353.4, "tokens": 232704}
+{"step": 150, "train_loss": 5.518, "val_loss": 5.4758, "val_ppl": 238.85, "wall": 103.7, "tok_s": 3356.5, "tokens": 347904}
+{"step": 200, "train_loss": 5.3469, "val_loss": 5.3351, "val_ppl": 207.49, "wall": 138.7, "tok_s": 3340.1, "tokens": 463104}
+{"step": 250, "train_loss": 5.4305, "val_loss": 5.2614, "val_ppl": 192.76, "wall": 173.8, "tok_s": 3328.2, "tokens": 578304}
+{"step": 300, "train_loss": 5.2504, "val_loss": 5.2169, "val_ppl": 184.36, "wall": 209.8, "tok_s": 3304.8, "tokens": 693504}
+{"step": 350, "train_loss": 5.3023, "val_loss": 5.1902, "val_ppl": 179.5, "wall": 246.2, "tok_s": 3284.7, "tokens": 808704}
+{"step": 399, "train_loss": 5.243, "val_loss": 5.1739, "val_ppl": 176.61, "wall": 282.2, "tok_s": 3265.8, "tokens": 921600}
+SUMMARY {"tag": "stu_scratch", "kind": "ema", "params": 1383170, "tokens": 921600, "wall_s": 282.2, "tok_s": 3265.6, "final_val_loss": 5.1739, "final_val_ppl": 176.61}

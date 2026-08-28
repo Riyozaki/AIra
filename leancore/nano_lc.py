@@ -515,7 +515,7 @@ def main():
             zs = lg / args.dtemp; ps = np.exp(zs - zs.max(-1, keepdims=True)); ps /= ps.sum(-1, keepdims=True)
             n = lg.shape[0] * lg.shape[1]
             kl = float((q * (np.log(q + 1e-12) - np.log(ps + 1e-12))).sum() / n)
-            dz = dz + args.dkl * (args.dtemp ** 2) * (ps - q)
+            dz = dz + args.dkl * (args.dtemp ** 2) * (ps - q) / n
             loss = loss + args.dkl * kl
         dH_aux = None
         if args.mtp > 0:
