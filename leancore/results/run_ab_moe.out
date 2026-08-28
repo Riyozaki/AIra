@@ -7,3 +7,8 @@
 {"step": 200, "train_loss": 5.2502, "val_loss": 5.2555, "val_ppl": 191.62, "wall": 235.3, "tok_s": 1968.5, "tokens": 463104}
 {"step": 250, "train_loss": 5.3434, "val_loss": 5.182, "val_ppl": 178.03, "wall": 288.0, "tok_s": 2008.0, "tokens": 578304}
 {"step": 300, "train_loss": 5.1403, "val_loss": 5.1366, "val_ppl": 170.14, "wall": 341.2, "tok_s": 2032.8, "tokens": 693504}
+{"step": 350, "train_loss": 5.2098, "val_loss": 5.1115, "val_ppl": 165.92, "wall": 396.7, "tok_s": 2038.6, "tokens": 808704}
+{"step": 400, "train_loss": 4.9653, "val_loss": 5.0898, "val_ppl": 162.35, "wall": 450.2, "tok_s": 2052.0, "tokens": 923904}
+{"step": 450, "train_loss": 5.1923, "val_loss": 5.082, "val_ppl": 161.09, "wall": 503.1, "tok_s": 2065.4, "tokens": 1039104}
+{"step": 499, "train_loss": 4.9354, "val_loss": 5.0722, "val_ppl": 159.52, "wall": 555.6, "tok_s": 2073.3, "tokens": 1152000}
+SUMMARY {"tag": "ab_moe", "kind": "ema", "params": 3480019, "tokens": 1152000, "wall_s": 555.7, "tok_s": 2073.2, "final_val_loss": 5.0722, "final_val_ppl": 159.52}

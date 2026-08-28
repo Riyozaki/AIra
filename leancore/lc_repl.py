@@ -35,6 +35,7 @@ class Engine:
     def gen(self, n, temp, topk):
         return [int(t) for t in self.cmd(f".gen {n} {temp} {topk}").split() if t.lstrip("-").isdigit()]
     def reset(self): self.cmd(".reset")
+    def tau(self, v): return self.cmd(f".tau {v}")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -42,8 +43,11 @@ def main():
     ap.add_argument("--temp", type=float, default=0.8); ap.add_argument("--topk", type=int, default=40)
     ap.add_argument("--max", type=int, default=96); ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--constitution", default=None, help="файл с системным промптом-конституцией")
+    ap.add_argument("--tau", type=float, default=None, help="compute-бюджет ADR гейта (аналог thinking-budget)")
+    ap.add_argument("--revise", action="store_true", help="draft → critique-pass → revise (CAI-lite)")
     a = ap.parse_args()
     e = Engine(a.model, a.seed)
+    if a.tau is not None: e.tau(a.tau)
     sys_prompt = open(a.constitution).read().strip() if a.constitution else \
         "the following is a dialogue between a person and an assistant, wise and honest:"
     print("[lc_repl] модель:", a.model, "| temp", a.temp, "topk", a.topk, "| /reset /exit")
@@ -57,6 +61,13 @@ def main():
         e.step([1] + tok(sys_prompt))
         e.step(tok("\n" + q + "\n"))
         ans = e.gen(a.max, a.temp, a.topk)
+        if a.revise:
+            # CAI-lite: модель критикует черновик (конституция = системный промпт) и переписывает
+            e.step(tok("\ncritique of the above:\n"))
+            crit = e.gen(a.max // 2, a.temp, a.topk)
+            e.step(tok("\nrevised answer:\n"))
+            ans = e.gen(a.max, a.temp, a.topk)
+            print("lc!(draft→critique→revise) critique:", detok(crit))
         print("lc>  " + detok(ans))
     e.cmd(".quit")
 

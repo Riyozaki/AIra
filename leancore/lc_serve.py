@@ -24,8 +24,11 @@ class H(BaseHTTPRequestHandler):
         if self.path != "/v1/completions": return self._json(404, {"error": "unknown"})
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         with LOCK:
-            ENG.reset(); ENG.step([1] + tok(body.get("prompt", "")))
+            ENG.reset()
+            if "tau" in body: ENG.tau(float(body["tau"]))
+            ENG.step([1] + tok(body.get("prompt", "")))
             ids = ENG.gen(int(body.get("max_tokens", 64)), float(body.get("temperature", 0.8)),
+                          int(body.get("top_k", 40)))
                           int(body.get("top_k", 40)))
         self._json(200, {"choices": [{"text": detok(ids), "finish_reason": "length"}],
                          "usage": {"completion_tokens": len(ids)}})
