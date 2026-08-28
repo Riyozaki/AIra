@@ -1,0 +1,15 @@
+[ab_adam] nano-ema params=2,592,195
+{"step": 0, "train_loss": 9.0287, "val_loss": 9.027, "val_ppl": 8324.57, "wall": 4.3, "tok_s": 531.7, "tokens": 2304}
+{"step": 50, "train_loss": 6.5004, "val_loss": 6.4164, "val_ppl": 611.78, "wall": 57.3, "tok_s": 2050.3, "tokens": 117504}
+{"step": 100, "train_loss": 6.0345, "val_loss": 5.8536, "val_ppl": 348.47, "wall": 109.3, "tok_s": 2129.5, "tokens": 232704}
+{"step": 150, "train_loss": 5.6091, "val_loss": 5.554, "val_ppl": 258.28, "wall": 172.3, "tok_s": 2018.8, "tokens": 347904}
+{"step": 200, "train_loss": 5.3926, "val_loss": 5.3967, "val_ppl": 220.67, "wall": 241.0, "tok_s": 1921.7, "tokens": 463104}
+{"step": 250, "train_loss": 5.4611, "val_loss": 5.2975, "val_ppl": 199.83, "wall": 303.1, "tok_s": 1908.3, "tokens": 578304}
+{"step": 300, "train_loss": 5.262, "val_loss": 5.2383, "val_ppl": 188.35, "wall": 367.0, "tok_s": 1889.7, "tokens": 693504}
+{"step": 350, "train_loss": 5.2875, "val_loss": 5.1941, "val_ppl": 180.2, "wall": 433.7, "tok_s": 1864.5, "tokens": 808704}
+{"step": 400, "train_loss": 5.0541, "val_loss": 5.1634, "val_ppl": 174.76, "wall": 491.6, "tok_s": 1879.5, "tokens": 923904}
+{"step": 450, "train_loss": 5.2549, "val_loss": 5.1446, "val_ppl": 171.5, "wall": 557.7, "tok_s": 1863.1, "tokens": 1039104}
+{"step": 500, "train_loss": 5.1169, "val_loss": 5.1253, "val_ppl": 168.23, "wall": 627.1, "tok_s": 1840.7, "tokens": 1154304}
+{"step": 550, "train_loss": 5.1237, "val_loss": 5.1187, "val_ppl": 167.13, "wall": 704.9, "tok_s": 1801.0, "tokens": 1269504}
+{"step": 599, "train_loss": 5.0116, "val_loss": 5.1108, "val_ppl": 165.81, "wall": 770.3, "tok_s": 1794.6, "tokens": 1382400}
+SUMMARY {"tag": "ab_adam", "kind": "ema", "params": 2592195, "tokens": 1382400, "wall_s": 770.4, "tok_s": 1794.5, "final_val_loss": 5.1108, "final_val_ppl": 165.81}

@@ -1,0 +1,27 @@
+<html xmlns:py="http://genshi.edgewall.org/"
+  xmlns:xi="http://www.w3.org/2001/XInclude">
+  
+  <py:def function="page_title">Index of Shakespeare plays</py:def>
+
+  <div py:match="content">
+    <p>
+      Below is a list of the material currently available. You might also want to
+      look at the <a href="/concordance/">concordance</a> and check out the <a
+      href="/guide/">guide</a>.
+    </p>
+    <div py:for="item in c.works_index">
+      <h3>${item.title}</h3>
+      <ul>
+        <li><strong>Title:</strong>${item.title}</li>
+        <li><strong>Author:</strong>${item.creator}</li>
+        <li><strong>View Text:</strong>
+        <a href="${h.url_for(controller='text', action='view',
+            name=item.name, format='lineno')}">${item.title}</a>
+        </li>
+        <li><strong>Notes:</strong>${item.notes}</li>
+      </ul>
+    </div>
+  </div>
+
+  <xi:include href="../layout.html" />
+</html>

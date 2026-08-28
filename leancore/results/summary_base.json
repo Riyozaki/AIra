@@ -1,0 +1,13 @@
+{
+  "tag": "base",
+  "variant": "baseline",
+  "params": 3032448,
+  "steps": 1000,
+  "tokens": 2304000,
+  "wall_s": 720.9,
+  "tok_s": 3195.9,
+  "peak_rss_mb": 999.3,
+  "flops_tok_fwd": 4841664,
+  "final_val_loss": 5.0841,
+  "final_val_ppl": 161.44
+}

@@ -1,0 +1,13 @@
+{
+  "tag": "lean",
+  "variant": "lean",
+  "params": 3033027,
+  "steps": 1000,
+  "tokens": 2304000,
+  "wall_s": 628.5,
+  "tok_s": 3666.0,
+  "peak_rss_mb": 864.5,
+  "flops_tok_fwd": 4190876,
+  "final_val_loss": 5.0886,
+  "final_val_ppl": 162.16
+}

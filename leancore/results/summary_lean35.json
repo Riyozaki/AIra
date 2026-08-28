@@ -1,0 +1,13 @@
+{
+  "tag": "lean35",
+  "variant": "lean",
+  "params": 3033027,
+  "steps": 700,
+  "tokens": 1612800,
+  "wall_s": 385.1,
+  "tok_s": 4188.2,
+  "peak_rss_mb": 832.0,
+  "flops_tok_fwd": 3929879,
+  "final_val_loss": 5.1681,
+  "final_val_ppl": 175.58
+}
