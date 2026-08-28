@@ -375,6 +375,7 @@ int main(int argc, char** argv) {
                 }
                 printf("\n");
             } else if (!strcmp(cmd, ".reset")) { reset_states(); printf("ok\n"); }
+            else if (!strcmp(cmd, ".tau")) { float tv = 0.4f; if (scanf("%f", &tv) == 1) TAU = tv; printf("ok\n"); }
             else if (!strcmp(cmd, ".seed")) { unsigned long long s; scanf("%llu", &s); RNG = s; printf("ok\n"); }
             else if (!strcmp(cmd, ".quit")) break;
         }
