@@ -131,8 +131,8 @@ def ema_mix_bwd(c, dY):
 
 # ---------------------------------------------------------------- model
 class NanoGPT:
-    def __init__(self, V, D=192, L=4, h=6, ff=576, T=96, kind="attn", adr_kf=None):
-        self.V, self.D, self.L, self.h, self.T, self.ff = V, D, L, h, T, ff
+    def __init__(self, V, D=192, L=4, h=6, ff=576, T=96, kind="attn", adr_kf=None, moe_e=1):
+        self.V, self.D, self.L, self.h, self.T, self.ff, self.moe_e = V, D, L, h, T, ff, moe_e
         self.kind, self.adr_kf = kind, adr_kf
         p = self.p = Params()
         p.add("E", (V, D)); p.add("pos", (T, D))
@@ -150,11 +150,18 @@ class NanoGPT:
                 p.add(f"b{i}.th", (D,), init=lambda s: np.zeros(s, f32))     # a=σ(0)=0.5
                 p.add(f"b{i}.sc", (D,), init=lambda s: np.ones(s, f32))
                 if kind_i == "delta":
-                    p.add(f"b{i}.braw", (), init=lambda s: np.array(0.0, f32))
+                    p.add(f"b{i}.braw", (), init=lambda s: np.array(-2.0, f32))   # β(0)=0.119 — мягкая коррекция
                 p.add(f"b{i}.Wm", (D, D))
             p.add(f"b{i}.ln2g", (D,), init=lambda s: np.ones(s, f32))
             p.add(f"b{i}.ln2b", (D,), init=lambda s: np.zeros(s, f32))
-            p.add(f"b{i}.fc1", (D, ff)); p.add(f"b{i}.fc2", (ff, D))
+            if self.moe_e > 1:
+                E, F2 = self.moe_e, ff // 2
+                p.add(f"b{i}.wr", (D, E))
+                p.add(f"b{i}.be", (E,), init=lambda s: np.zeros(s, f32))
+                p.add(f"b{i}.w1", (E, D, F2))
+                p.add(f"b{i}.w2", (E, F2, D))
+            else:
+                p.add(f"b{i}.fc1", (D, ff)); p.add(f"b{i}.fc2", (ff, D))
             if b["routed"]:
                 p.add(f"b{i}.rw", (D,))
                 p.add(f"b{i}.rb", (), init=lambda s: np.array(1.5, f32))
@@ -176,18 +183,27 @@ class NanoGPT:
         H2 = X2 + mix
         ln_out2, c["ln2"] = layernorm(H2, p[f"b{i}.ln2g"], p[f"b{i}.ln2b"])
         c["fc1_in"] = ln_out2
-        g1, c["gelu"] = gelu(ln_out2 @ p[f"b{i}.fc1"])
-        o2, c["fc2"] = linear(g1, p[f"b{i}.fc2"])
+        if self.moe_e > 1:
+            c[f"moe_be_{i}"] = p[f"b{i}.be"].copy()
+            o2, c["moe"] = moe_ffn(ln_out2, p[f"b{i}.wr"], p[f"b{i}.be"], p[f"b{i}.w1"], p[f"b{i}.w2"], i)
+        else:
+            g1, c["gelu"] = gelu(ln_out2 @ p[f"b{i}.fc1"])
+            o2, c["fc2"] = linear(g1, p[f"b{i}.fc2"])
         c["delta"] = mix + o2
         return mix + o2, c
 
     def _arm_backward(self, c, dD, i, b):
         """dD = dL/dDelta → возвращает dL/dX2 (вход плеча)."""
         p, g = self.p.d, self.p.g
-        dX2f, dW2 = linear_bwd(c["fc2"], dD); g[f"b{i}.fc2"] += dW2
-        dpre = gelu_bwd(c["gelu"], dX2f)
-        g[f"b{i}.fc1"] += c["fc1_in"].reshape(-1, self.D).T @ dpre.reshape(-1, self.ff)
-        dln2 = dpre @ p[f"b{i}.fc1"].T
+        if self.moe_e > 1:
+            dxm, dwr, dbe, dw1, dw2 = moe_ffn_bwd(c["moe"], dD)
+            g[f"b{i}.wr"] += dwr; g[f"b{i}.w1"] += dw1; g[f"b{i}.w2"] += dw2
+            dln2 = dxm
+        else:
+            dX2f, dW2 = linear_bwd(c["fc2"], dD); g[f"b{i}.fc2"] += dW2
+            dpre = gelu_bwd(c["gelu"], dX2f)
+            g[f"b{i}.fc1"] += c["fc1_in"].reshape(-1, self.D).T @ dpre.reshape(-1, self.ff)
+            dln2 = dpre @ p[f"b{i}.fc1"].T
         dx2, dg2, db2 = layernorm_bwd(c["ln2"], dln2); g[f"b{i}.ln2g"] += dg2; g[f"b{i}.ln2b"] += db2
         dmix = dD + dx2                            # mix питает Δ и H2 (вход ln2)
         if b["kind"] == "attn":
@@ -325,13 +341,115 @@ class MuonW:
             self.p.d[k] -= lr * (mh / (np.sqrt(vh) + self.eps) + self.wd * self.p.d[k])
         self.p.zero()
 
+
+# ---------------------------------------------------------------- KDA-lite delta-миксер
+# S_0 = 0;  p = S·k;  u = v − p;  S ← Diag(a)·S + β·u⊗k;  o = a⊙p + β·u·‖k‖²   [k ≡ v ≡ y]
+def delta_mix(X, th, sc, braw):                # X (B,T,D) → (Y, cache); k = x/‖x‖, v = x
+    a = 1.0 / (1.0 + np.exp(-th)); beta = 1.0 / (1.0 + np.exp(-braw))
+    B, T, D = X.shape
+    S = np.zeros((B, D, D), X.dtype)
+    Y = np.empty_like(X)
+    KN = np.empty((B, T), X.dtype)                # ‖x_t‖
+    P = np.empty_like(X); U = np.empty_like(X); N2 = np.empty((B, T), X.dtype)
+    KK = np.empty_like(X)
+    SS = []                                       # состояния до апдейта (для backward)
+    for t in range(T):
+        v = X[:, t]                               # (B,D)
+        kn = np.sqrt((v * v).sum(-1)) + 1e-8
+        k = v / kn[:, None]
+        p_ = np.einsum('bij,bj->bi', S, k)
+        u = v - p_
+        SS.append(S)
+        n2 = (k * k).sum(-1)                      # ≈1
+        S = a[None, :, None] * S + beta * u[:, :, None] * k[:, None, :]
+        o = a[None, :] * p_ + beta * u * n2[:, None]
+        P[:, t] = p_; U[:, t] = u; N2[:, t] = n2; KK[:, t] = k; KN[:, t] = kn
+        Y[:, t] = o * sc
+    return Y, (X, KK, KN, P, U, N2, SS, a, beta, sc)
+
+def delta_mix_bwd(c, dY):
+    X, KK, KN, P, U, N2, SS, a, beta, sc = c
+    B, T, D = X.shape
+    dX = np.zeros_like(X); dth = np.zeros(D, X.dtype); dbeta = 0.0
+    dsc = (dY * (a[None, None, :] * P + beta * U * N2[:, :, None])).sum((0, 1))
+    dO = dY * sc
+    G = np.zeros((B, D, D), X.dtype)              # dL/dS_t
+    da = np.zeros(D, X.dtype)
+    for t in range(T - 1, -1, -1):
+        v = X[:, t]; k = KK[:, t]; kn = KN[:, t]
+        p = P[:, t]; u = U[:, t]; n2 = N2[:, t]; S = SS[t]
+        dOt = dO[:, t]
+        da += (dOt * p).sum(0)
+        dbeta += float((dOt * u * n2[:, None]).sum())
+        dn2 = (dOt * (beta * u)).sum(-1)
+        da += (G * S).sum((0, 2))                                   # a через обновление S_t
+        dbeta += float((G * (u[:, :, None] * k[:, None, :])).sum())
+        du = dOt * beta * n2[:, None] + beta * np.einsum('bij,bj->bi', G, k)   # u: через o и через S_t
+        dp = dOt * a[None, :] - du                                  # p: через o и через u=k−p
+        dk = 2.0 * k * dn2[:, None] + beta * np.einsum('bij,bi->bj', G, u)
+        dk_tot = dk + np.einsum('bij,bi->bj', S, dp)                # d/dk
+        # k = v / ‖v‖: d/dv = (dk_tot − k̂(dk_tot·k̂))/‖v‖; v-path отдельно: du
+        dX[:, t] = du + (dk_tot - k * (dk_tot * k).sum(-1, keepdims=True)) / kn[:, None]
+        G = a[None, :, None] * G + np.einsum('bi,bj->bij', dp, k)
+    dth = da * a * (1 - a)
+    dbraw = np.array(dbeta * beta * (1 - beta), X.dtype)
+    return dX, dth, dsc, dbraw
+
+# ---------------------------------------------------------------- MoE-FFN (DeepSeek-style, aux-loss-free)
+MOE_STATS = {}                                   # running loads для bias-апдейта (не градиентно)
+
+def moe_ffn(X, Wr, be, W1, W2, key):           # X (B,T,D); W1 (E,D,F2); W2 (E,F2,D)
+    B, T, D = X.shape; E = Wr.shape[1]; F2 = W1.shape[2]
+    s = X @ Wr                                   # (B,T,E) affinity (сырые)
+    sel = (s + be).argmax(-1)                    # hard top-1 с bias-коррекцией (aux-loss-free)
+    sg = 1.0 / (1.0 + np.exp(-s))
+    gv = np.take_along_axis(sg, sel[..., None], -1)[..., 0]      # gate = σ(s_sel), bias в выбор НЕ в значение
+    with np.errstate(over='ignore'):
+        pass
+    out = np.zeros_like(X)
+    for e in range(E):
+        m = sel == e
+        if not m.any(): continue
+        xe = X[m]
+        h = gelu(xe @ W1[e])[0] @ W2[e]
+        out[m] = gv[m, None] * h
+    loads = np.bincount(sel.reshape(-1), minlength=E) / float(B * T)
+    MOE_STATS.setdefault(key, np.full(E, 1.0 / E))
+    MOE_STATS[key] = 0.99 * MOE_STATS[key] + 0.01 * loads
+    return out, (X, Wr, be, W1, W2, sel, sg, gv, s)
+
+def moe_ffn_bwd(c, dOut):
+    X, Wr, be, W1, W2, sel, sg, gv, s = c
+    B, T, D = X.shape; E = Wr.shape[1]; F2 = W1.shape[2]
+    dX = np.zeros_like(X); dWr = np.zeros_like(Wr)
+    dW1 = np.zeros_like(W1); dW2 = np.zeros_like(W2)
+    ds = np.zeros_like(s)
+    for e in range(E):
+        m = sel == e
+        if not m.any(): continue
+        xe = X[m]; dO = dOut[m]
+        dgv = (dO * (gelu(xe @ W1[e])[0] @ W2[e])).sum(-1)         # (N,)
+        dh = dO * gv[m, None]
+        z1, cg = gelu(xe @ W1[e])
+        dz1 = gelu_bwd(cg, dh @ W2[e].T)
+        dW2[e] += z1.T @ dh
+        dW1[e] += xe.T @ dz1
+        dX[m] += dz1 @ W1[e].T
+        dsel = dgv * gv[m] * (1 - gv[m])
+        ds[..., e][m] += dsel
+        # gate σ(s_sel): вклад в остальные эксперты = 0 (top-1 hard, как и выбор)
+    dWr = X.reshape(-1, D).T @ ds.reshape(-1, E)
+    dX += ds @ Wr.T
+    dbe = ds.sum((0, 1)) * 0.0                     # bias обновляется running-статистикой
+    return dX, dWr, dbe, dW1, dW2
+
 def main():
     args = ap_parse()
     tr = np.load(f"{ROOT}/{args.data}/train.npy").astype(np.int64)
     va = np.load(f"{ROOT}/{args.data}/val.npy").astype(np.int64)
     V = json.load(open(f"{ROOT}/{args.data}/meta.json"))["vocab"]
     rng = np.random.default_rng(42)
-    model = NanoGPT(V, kind=args.kind, adr_kf=args.adr)
+    model = NanoGPT(V, kind=args.kind, adr_kf=args.adr, moe_e=args.moe)
     if args.initckpt:
         d0 = np.load(args.initckpt)
         for k in model.p.d:
@@ -367,6 +485,10 @@ def main():
         lg = model.logits(H)
         loss, dz = softmax_ce(lg, y)
         model.backward(H, caches, dz)
+        if args.moe > 1:
+            for i in range(model.L):
+                be = model.p.d[f"b{i}.be"]
+                be += 0.02 * (0.25 - MOE_STATS[i])         # bias ↑ недогруженным экспертам
         opt.step(lr)
         toks += x.size
         if step % args.eval_every == 0 or step == args.steps - 1:
@@ -385,6 +507,7 @@ def ap_parse():
     ap.add_argument("--kind", choices=["attn", "ema", "hybrid", "delta"], required=True)
     ap.add_argument("--opt", choices=["adam", "muon"], default="adam")
     ap.add_argument("--mulr", type=float, default=0.02)
+    ap.add_argument("--moe", type=int, default=1, help="E экспертов top-1 (DeepSeek aux-loss-free); 1 = dense FFN")
     ap.add_argument("--tag", required=True)
     ap.add_argument("--steps", type=int, default=500)
     ap.add_argument("--batch", type=int, default=24)
@@ -399,49 +522,3 @@ def ap_parse():
 
 if __name__ == "__main__":
     main()
-
-# ---------------------------------------------------------------- KDA-lite delta-миксер
-# S_0 = 0;  p = S·k;  u = v − p;  S ← Diag(a)·S + β·u⊗k;  o = a⊙p + β·u·‖k‖²   [k ≡ v ≡ y]
-def delta_mix(X, th, sc, braw):                # X (B,T,D) → (Y, cache)
-    a = 1.0 / (1.0 + np.exp(-th)); beta = 1.0 / (1.0 + np.exp(-braw))
-    B, T, D = X.shape
-    S = np.zeros((B, D, D), X.dtype)
-    Y = np.empty_like(X)
-    P = np.empty_like(X); U = np.empty_like(X); N2 = np.empty((B, T), X.dtype)
-    SS = []                                       # состояния до апдейта (для backward)
-    for t in range(T):
-        k = X[:, t]                               # (B,D), k ≡ v
-        p_ = np.einsum('bij,bj->bi', S, k)
-        u = k - p_
-        SS.append(S)
-        n2 = (k * k).sum(-1)
-        S = a[None, :, None] * S + beta * u[:, :, None] * k[:, None, :]
-        o = a[None, :] * p_ + beta * u * n2[:, None]
-        P[:, t] = p_; U[:, t] = u; N2[:, t] = n2
-        Y[:, t] = o * sc
-    return Y, (X, P, U, N2, SS, a, beta, sc)
-
-def delta_mix_bwd(c, dY):
-    X, P, U, N2, SS, a, beta, sc = c
-    B, T, D = X.shape
-    dX = np.zeros_like(X); dth = np.zeros(D, X.dtype); dbeta = 0.0
-    dsc = (dY * (a[None, None, :] * P + beta * U * N2[:, :, None])).sum((0, 1))
-    dO = dY * sc
-    G = np.zeros((B, D, D), X.dtype)              # dL/dS_t
-    da = np.zeros(D, X.dtype)
-    for t in range(T - 1, -1, -1):
-        k = X[:, t]; p = P[:, t]; u = U[:, t]; n2 = N2[:, t]; S = SS[t]
-        dOt = dO[:, t]
-        da += (dOt * p).sum(0)
-        dbeta += float((dOt * u * n2[:, None]).sum())
-        dn2 = (dOt * (beta * u)).sum(-1)
-        da += (G * S).sum((0, 2))                                   # a через обновление S_t
-        dbeta += float((G * (u[:, :, None] * k[:, None, :])).sum())
-        du = dOt * beta * n2[:, None] + beta * np.einsum('bij,bj->bi', G, k)   # u: через o и через S_t
-        dp = dOt * a[None, :] - du                                  # p: через o и через u=k−p
-        dk = 2.0 * k * dn2[:, None] + beta * np.einsum('bij,bi->bj', G, u)
-        dX[:, t] = du + dk + np.einsum('bij,bi->bj', S, dp)         # v-path: du; k-paths: dk, dp через S
-        G = a[None, :, None] * G + np.einsum('bi,bj->bij', dp, k)
-    dth = da * a * (1 - a)
-    dbraw = np.array(dbeta * beta * (1 - beta), X.dtype)
-    return dX, dth, dsc, dbraw

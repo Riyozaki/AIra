@@ -136,6 +136,8 @@ w, wh = model_fd("ema+ADR", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind
 results.append(("ema+ADR", w, wh, w < 5e-4))
 w, wh = model_fd("delta", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="delta"))
 results.append(("kda-delta", w, wh, w < 5e-4))
+w, wh = model_fd("ema+moe4", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="ema", moe_e=4))
+results.append(("ema+moe4", w, wh, w < 5e-4))
 
 ok_all = True
 for name, worst, where, ok in results:
