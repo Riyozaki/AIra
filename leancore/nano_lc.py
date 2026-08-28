@@ -357,45 +357,46 @@ def delta_mix(X, th, sc, braw):                # X (B,T,D) → (Y, cache); k = x
     KN = np.empty((B, T), X.dtype)                # ‖x_t‖
     P = np.empty_like(X); U = np.empty_like(X); N2 = np.empty((B, T), X.dtype)
     KK = np.empty_like(X)
-    SS = []                                       # состояния до апдейта (для backward)
-    for t in range(T):
-        v = X[:, t]                               # (B,D)
+    for t in range(T):                            # KDA-update, состояние не складируем (backward replay)
+        v = X[:, t]
         kn = np.sqrt((v * v).sum(-1)) + 1e-8
         k = v / kn[:, None]
         p_ = np.einsum('bij,bj->bi', S, k)
         u = v - p_
-        SS.append(S)
         n2 = (k * k).sum(-1)                      # ≈1
         S = a[None, :, None] * S + beta * u[:, :, None] * k[:, None, :]
         o = a[None, :] * p_ + beta * u * n2[:, None]
         P[:, t] = p_; U[:, t] = u; N2[:, t] = n2; KK[:, t] = k; KN[:, t] = kn
         Y[:, t] = o * sc
-    return Y, (X, KK, KN, P, U, N2, SS, a, beta, sc)
+    return Y, (X, KK, KN, P, U, N2, S, a, beta, sc)   # в кэше только S_T
 
 def delta_mix_bwd(c, dY):
-    X, KK, KN, P, U, N2, SS, a, beta, sc = c
+    X, KK, KN, P, U, N2, Sfin, a, beta, sc = c
     B, T, D = X.shape
     dX = np.zeros_like(X); dth = np.zeros(D, X.dtype); dbeta = 0.0
     dsc = (dY * (a[None, None, :] * P + beta * U * N2[:, :, None])).sum((0, 1))
     dO = dY * sc
     G = np.zeros((B, D, D), X.dtype)              # dL/dS_t
     da = np.zeros(D, X.dtype)
+    Scur = Sfin
     for t in range(T - 1, -1, -1):
         v = X[:, t]; k = KK[:, t]; kn = KN[:, t]
-        p = P[:, t]; u = U[:, t]; n2 = N2[:, t]; S = SS[t]
+        u = U[:, t]
+        S = (Scur - beta * u[:, :, None] * k[:, None, :]) / a[None, :, None]   # S_{t-1} точно
+        p = P[:, t]; n2 = N2[:, t]
         dOt = dO[:, t]
         da += (dOt * p).sum(0)
         dbeta += float((dOt * u * n2[:, None]).sum())
         dn2 = (dOt * (beta * u)).sum(-1)
-        da += (G * S).sum((0, 2))                                   # a через обновление S_t
+        da += (G * S).sum((0, 2))
         dbeta += float((G * (u[:, :, None] * k[:, None, :])).sum())
-        du = dOt * beta * n2[:, None] + beta * np.einsum('bij,bj->bi', G, k)   # u: через o и через S_t
-        dp = dOt * a[None, :] - du                                  # p: через o и через u=k−p
+        du = dOt * beta * n2[:, None] + beta * np.einsum('bij,bj->bi', G, k)
+        dp = dOt * a[None, :] - du
         dk = 2.0 * k * dn2[:, None] + beta * np.einsum('bij,bi->bj', G, u)
-        dk_tot = dk + np.einsum('bij,bi->bj', S, dp)                # d/dk
-        # k = v / ‖v‖: d/dv = (dk_tot − k̂(dk_tot·k̂))/‖v‖; v-path отдельно: du
+        dk_tot = dk + np.einsum('bij,bi->bj', S, dp)
         dX[:, t] = du + (dk_tot - k * (dk_tot * k).sum(-1, keepdims=True)) / kn[:, None]
         G = a[None, :, None] * G + np.einsum('bi,bj->bij', dp, k)
+        Scur = S
     dth = da * a * (1 - a)
     dbraw = np.array(dbeta * beta * (1 - beta), X.dtype)
     return dX, dth, dsc, dbraw
