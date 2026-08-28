@@ -7,3 +7,5 @@
 {"step": 300, "train_loss": 8.3051, "val_loss": 8.3505, "val_ppl": 4232.45, "wall": 885.6, "tok_s": 783.1, "tokens": 693504}
 {"step": 350, "train_loss": 8.2646, "val_loss": 8.3435, "val_ppl": 4202.96, "wall": 1025.0, "tok_s": 789.0, "tokens": 808704}
 {"step": 400, "train_loss": 8.2412, "val_loss": 8.3319, "val_ppl": 4154.49, "wall": 1165.1, "tok_s": 793.0, "tokens": 923904}
+{"step": 450, "train_loss": 8.2864, "val_loss": 8.3304, "val_ppl": 4148.2, "wall": 1458.0, "tok_s": 712.7, "tokens": 1039104}
+{"step": 499, "train_loss": 8.2374, "val_loss": 8.3174, "val_ppl": 4094.56, "wall": 1787.7, "tok_s": 644.4, "tokens": 1152000}
