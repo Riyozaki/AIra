@@ -66,5 +66,25 @@ print(f"{'OK ' if abs(nll_ref-nll_c) < 1e-4 else 'FAIL'} sce loss: ref {nll_ref:
 if abs(nll_ref - nll_c) >= 1e-4: fails += 1
 chk("sce dz", dz_ref, dz_c, 5e-6)
 
+# --- ema fwd/bwd (C vs numpy-einsum опора) ---
+import importlib
+sys.path.insert(0, ROOT)
+import nano_lc as NL
+B_, T_, D_ = 4, 96, 192
+Xe = rng.normal(0, 1, (B_, T_, D_)).astype(np.float32)
+th = rng.normal(0, .8, D_).astype(np.float32); scv = rng.normal(1, .2, D_).astype(np.float32)
+dYe = rng.normal(0, 1, (B_, T_, D_)).astype(np.float32)
+KS_holder = NL._KS
+NL._KS = None
+Y_ref, cch = NL.ema_mix(Xe, th, scv)                       # einsum-опора
+dX_ref, dth_ref, dsc_ref = NL.ema_mix_bwd(cch, dYe)
+NL._KS = KS_holder
+Y_c, cc_h = NL.ema_mix(Xe, th, scv)                        # C-путь
+dX_c, dth_c, dsc_c = NL.ema_mix_bwd(cc_h, dYe)
+chk("ema_fwd", Y_ref, Y_c, 1e-5)
+chk("ema_bwd dX", dX_ref, dX_c, 2e-4)
+chk("ema_bwd dth", dth_ref, dth_c, 2e-5)
+chk("ema_bwd dsc", dsc_ref, dsc_c, 2e-4)
+
 print("== C-KERNELS " + ("ALL OK ==" if fails == 0 else f"{fails} FAIL =="))
 sys.exit(1 if fails else 0)

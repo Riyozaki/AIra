@@ -37,6 +37,8 @@ try:
     _KS.k_ln_bwd.argtypes = [_F, _F, _F, _F, _F, _F, _F, _ct.c_int64, _ct.c_int]
     _KS.k_sce.argtypes = [_F, _I, _ct.c_int64, _ct.c_int64, _ct.c_float]
     _KS.k_sce.restype = _ct.c_double
+    _KS.k_ema_fwd.argtypes = [_F, _F, _F, _F, _F, _ct.c_int, _ct.c_int, _ct.c_int]
+    _KS.k_ema_bwd.argtypes = [_F, _F, _F, _F, _F, _F, _F, _F, _ct.c_int, _ct.c_int, _ct.c_int]
 except OSError:
     _KS = None
 
@@ -179,9 +181,15 @@ def _ema_mats(a, T, D, dt):
     _EMA_CACHE[key] = (M, Lb)
     return M, Lb
 
-def ema_mix(X, th, sc):                        # h_t = a·h_{t-1} + (1-a)·x_t; y = sc⊙h — поток в Σ-форме
+def ema_mix(X, th, sc):                        # h_t = a·h_{t-1} + (1-a)·x_t; y = sc⊙h
     a = (1.0 / (1.0 + np.exp(-th))).astype(X.dtype)
     B, T, D = X.shape
+    if _KS is not None and X.dtype == np.float32:
+        Xc = np.ascontiguousarray(X)
+        H = np.empty_like(Xc); Y = np.empty_like(Xc)
+        ac = np.ascontiguousarray(a); scc = np.ascontiguousarray(sc)
+        _KS.k_ema_fwd(_fp(Xc), _fp(ac), _fp(scc), _fp(Y), _fp(H), B, T, D)
+        return Y, (Xc, H, a, sc)
     M, _ = _ema_mats(a, T, D, X.dtype)
     H = np.einsum('tkd,bkd->btd', M, X, optimize=True)
     return H * sc, (X, H, a, sc)
@@ -189,6 +197,13 @@ def ema_mix(X, th, sc):                        # h_t = a·h_{t-1} + (1-a)·x_t; 
 def ema_mix_bwd(c, dY):
     X, H, a, sc = c
     B, T, D = X.shape
+    if _KS is not None and dY.dtype == np.float32:
+        dYc = np.ascontiguousarray(dY)
+        dX = np.empty_like(Xc_ := np.ascontiguousarray(X))
+        dth = np.empty(D, np.float32); dsc = np.empty(D, np.float32)
+        _KS.k_ema_bwd(_fp(Xc_), _fp(np.ascontiguousarray(H)), _fp(np.ascontiguousarray(a)),
+                      _fp(np.ascontiguousarray(sc)), _fp(dYc), _fp(dX), _fp(dth), _fp(dsc), B, T, D)
+        return dX, dth, dsc
     dH = dY * sc
     dsc = (dY * H).sum(axis=(0, 1))
     M, Lb = _ema_mats(a, T, D, X.dtype)

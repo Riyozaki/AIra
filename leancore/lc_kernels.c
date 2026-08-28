@@ -2,6 +2,7 @@
 // f32, семантика 1:1 с numpy-версиями. gcc -O3 -march=native векторизует сам.
 #include <math.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 // ---------------------------------------------------------------- gelu (tanh-approx)
 void k_gelu_fwd(const float* x, float* y, float* t_cache, int64_t n) {
@@ -74,4 +75,59 @@ double k_sce(float* lg, const int64_t* y, int64_t R, int64_t V, float invn) {
         lr[y[r]] -= invn;
     }
     return nll / (double)R;
+}
+
+// ----------------------------------------- EMA-миксер: h_t = a⊙h_{t−1} + (1−a)⊙x_t
+// параллелим по B·D, последовательны по T. X (B,T,D) row-major.
+void k_ema_fwd(const float* X, const float* a, const float* sc, float* Y, float* H,
+               int B, int T, int D) {
+    int BD = B * D;
+    for (int b = 0; b < B; b++) {
+        const float* xb = X + (size_t)b * T * D;
+        float* hb = H + (size_t)b * T * D; float* yb = Y + (size_t)b * T * D;
+        for (int d = 0; d < D; d++) hb[d] = (1.f - a[d]) * xb[d];
+        for (int t = 1; t < T; t++) {
+            const float* xt = xb + (size_t)t * D; float* ht = hb + (size_t)t * D;
+            const float* hp = ht - D;
+            for (int d = 0; d < D; d++) ht[d] = a[d] * hp[d] + (1.f - a[d]) * xt[d];
+        }
+        for (int t = 0; t < T; t++) {
+            float* yt = yb + (size_t)t * D; float* ht = hb + (size_t)t * D;
+            for (int d = 0; d < D; d++) yt[d] = ht[d] * sc[d];
+        }
+    }
+    (void)BD;
+}
+// lam_t = dH_t + a·lam_{t+1}; dX=(1−a)lam; da=Σ lam(hprev−x); dth=da·a(1−a); dsc=Σ dY·H
+void k_ema_bwd(const float* X, const float* H, const float* a, const float* sc,
+               const float* dY, float* dX, float* dth, float* dsc, int B, int T, int D) {
+    for (int d = 0; d < D; d++) { dth[d] = 0.f; dsc[d] = 0.f; }
+    static __thread float* lambuf = 0; static __thread int lamcap = 0;
+    if (lamcap < D) { lambuf = (float*)realloc(lambuf, D * 4); lamcap = D; }
+    for (int b = 0; b < B; b++) {
+        const float* xb = X + (size_t)b * T * D;
+        const float* hb = H + (size_t)b * T * D;
+        const float* yb = dY + (size_t)b * T * D;
+        float* dxb = dX + (size_t)b * T * D;
+        for (int t = 0; t < T; t++) {
+            const float* yt = yb + (size_t)t * D; const float* ht = hb + (size_t)t * D;
+            for (int d = 0; d < D; d++) dsc[d] += yt[d] * ht[d];
+        }
+        float* lm = lambuf;
+        for (int d = 0; d < D; d++) lm[d] = 0.f;
+        for (int t = T - 1; t >= 0; t--) {
+            const float* yt = yb + (size_t)t * D;
+            const float* ht = hb + (size_t)t * D;
+            const float* xt = xb + (size_t)t * D;
+            float* dxt = dxb + (size_t)t * D;
+            const float* hp = t > 0 ? ht - D : 0;
+            for (int d = 0; d < D; d++) {
+                lm[d] = yt[d] * sc[d] + a[d] * lm[d];
+                dxt[d] = (1.f - a[d]) * lm[d];
+                float hprev = t > 0 ? hp[d] : 0.f;
+                dth[d] += lm[d] * (hprev - xt[d]);
+            }
+        }
+    }
+    for (int d = 0; d < D; d++) dth[d] *= a[d] * (1.f - a[d]);
 }
