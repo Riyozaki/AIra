@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from lc_repl import Engine, tok, detok
 
 import os
-MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results/champ4k_qat.lcw2")
+MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results/champ3_qat_kl8.lcw2")
 ENG = None
 LOCK = threading.Lock()
 
