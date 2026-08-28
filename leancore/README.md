@@ -83,6 +83,12 @@ LeanCore — за 2.304М токенов и 628 с.
 
 Верификация backward: `python3 gradcheck.py` (ожидание: все OK; формулы — MATH.md §5, §9).
 
+## Обвязка (LLM-сервис, v2)
+
+- `lc_stream model.lcw2 chat` — stdin-протокол: `.step <id>` / `.gen <n> <temp> <topk>` / `.tau <v>` / `.reset` / `.seed`; состояние постоянно внутри процесса.
+- `lc_repl.py [--tau 0.4] [--revise] [--constitution FILE]` — интерактивный чат; `--revise` = CAI-lite (draft→critique→revise); `--tau` = compute-бюджет ADR-гейта (наш аналог Qwen3 thinking-budget; влияет на скорость и качество потока).
+- `lc_serve.py [PORT] [MODEL]` — HTTP: `GET /health`, `POST /v1/completions {prompt, max_tokens, temperature, top_k, tau}`.
+
 ### Измеренная итоговая линейка (все числа воспроизводимы из results/; история чемпиона-2000 — MATH.md)
 
 | компонент | результат | статус |
