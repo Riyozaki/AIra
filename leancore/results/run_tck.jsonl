@@ -1,0 +1,2 @@
+{"step": 0, "train_loss": 9.0236, "val_loss": 8.9725, "val_ppl": 7883.36, "wall": 2.2, "tok_s": 1070.4, "tokens": 2304}
+{"step": 59, "train_loss": 5.9801, "val_loss": 5.9347, "val_ppl": 377.92, "wall": 32.4, "tok_s": 4267.6, "tokens": 138240}

@@ -24,7 +24,31 @@ class Params:
         for k in self.g: self.g[k][...] = 0
 
 # ---------------------------------------------------------------- core ops (fwd + hand-derived bwd)
-def gelu(x):                                   # tanh-approx gelu, слито по памяти
+
+# ---- ctypes-ядра (lc_kernels.so): gelu / layernorm / softmax+CE — с numpy-фолбэком ----
+import ctypes as _ct
+_KS = None
+try:
+    _KS = _ct.CDLL(os.path.join(ROOT, "lc_kernels.so"))
+    _F = _ct.POINTER(_ct.c_float); _I = _ct.POINTER(_ct.c_int64)
+    _KS.k_gelu_fwd.argtypes = [_F, _F, _F, _ct.c_int64]
+    _KS.k_gelu_bwd.argtypes = [_F, _F, _F, _F, _ct.c_int64]
+    _KS.k_ln_fwd.argtypes = [_F, _F, _F, _F, _F, _F, _F, _ct.c_int64, _ct.c_int, _ct.c_float]
+    _KS.k_ln_bwd.argtypes = [_F, _F, _F, _F, _F, _F, _F, _ct.c_int64, _ct.c_int]
+    _KS.k_sce.argtypes = [_F, _I, _ct.c_int64, _ct.c_int64, _ct.c_float]
+    _KS.k_sce.restype = _ct.c_double
+except OSError:
+    _KS = None
+
+
+def _fp(a): return a.ctypes.data_as(_ct.POINTER(_ct.c_float))
+
+def gelu(x):                                   # tanh-approx gelu: ctypes-ядро или numpy
+    if _KS is not None and x.dtype == np.float32:
+        xc = np.ascontiguousarray(x, np.float32); n = xc.size
+        y = np.empty_like(xc); t = np.empty_like(xc)
+        _KS.k_gelu_fwd(_fp(xc), _fp(y), _fp(t), n)
+        return y, (xc, t)
     c1 = np.float32(0.044715); c0 = np.float32(0.7978845608028654)
     x2 = x * x
     u = x2 * x; u *= c1; u += x; u *= c0
@@ -33,6 +57,11 @@ def gelu(x):                                   # tanh-approx gelu, слито п
     return y, (x, t)
 def gelu_bwd(c, dy):                           # dx = dy·(½(1+t) + ½x(1−t²)·k0(1+3c₁x²))
     x, t = c
+    if _KS is not None and dy.dtype == np.float32:
+        dyc = np.ascontiguousarray(dy, np.float32); n = x.size
+        dx = np.empty_like(x)
+        _KS.k_gelu_bwd(_fp(x), _fp(t), _fp(dyc), _fp(dx), n)
+        return dx
     q = t.copy(); q *= t; q *= np.float32(-1.0); q += np.float32(1.0)   # 1−t²
     x2 = x * x; x2 *= np.float32(3.0 * 0.044715); x2 += np.float32(1.0) # 1+3c₁x²
     q *= x2; q *= np.float32(0.5 * 0.7978845608028654); q *= x          # ½k0·x·(1−t²)(1+3c₁x²)
@@ -42,12 +71,28 @@ def gelu_bwd(c, dy):                           # dx = dy·(½(1+t) + ½x(1−t²
 
 def layernorm(x, g, b, eps=1e-5):              # x: (...,N)
     N = x.shape[-1]
+    if _KS is not None and x.dtype == np.float32:
+        xc = np.ascontiguousarray(x, np.float32)
+        R = xc.size // N
+        y = np.empty_like(xc); xhat = np.empty_like(xc)
+        mu = np.empty(R, np.float32); istd = np.empty(R, np.float32)
+        _KS.k_ln_fwd(_fp(xc), _fp(g), _fp(b), _fp(y), _fp(xhat), _fp(mu), _fp(istd), R, N, np.float32(eps))
+        return y, (xhat, istd.reshape(x.shape[:-1] + (1,)), g, N)
     mu = x.mean(-1, keepdims=True); xc = x - mu
     var = (xc**2).mean(-1, keepdims=True); istd = 1.0 / np.sqrt(var + eps)
     xhat = xc * istd
     return g * xhat + b, (xhat, istd, g, N)
 def layernorm_bwd(c, dy):
     xhat, istd, g, N = c
+    if _KS is not None and dy.dtype == np.float32:
+        dyc = np.ascontiguousarray(dy, np.float32)
+        R = dyc.size // N
+        dx = np.empty_like(dyc); dg = np.empty(N, np.float32); db = np.empty(N, np.float32)
+        _KS.k_ln_bwd(_fp(np.ascontiguousarray(g, np.float32)), _fp(dyc),
+                     _fp(np.ascontiguousarray(xhat, np.float32)),
+                     _fp(np.ascontiguousarray(istd.reshape(-1), np.float32)),
+                     _fp(dx), _fp(dg), _fp(db), R, N)
+        return dx, dg, db
     dg = (dy * xhat).sum(axis=tuple(range(dy.ndim - 1)))
     db = dy.sum(axis=tuple(range(dy.ndim - 1)))
     v = dy * g                                                   # γ ДО редукций
@@ -69,10 +114,16 @@ def linear_bwd(c, dy):
     dw = x.reshape(-1, x.shape[-1]).T @ dy.reshape(-1, dy.shape[-1])
     return dy @ W.T, dw
 
-def softmax_ce(logits, y):                     # logits (B,T,V), y (B,T) -> (loss, dlogits)
+def softmax_ce(logits, y, destroy=False):      # logits (B,T,V), y (B,T) -> (loss, dlogits); destroy=True → пишем dz поверх logits
+    B, T, V = logits.shape
+    if _KS is not None and logits.dtype == np.float32:
+        dz = logits if (destroy and logits.flags['C_CONTIGUOUS']) else np.ascontiguousarray(logits, np.float32).copy()
+        yy = np.ascontiguousarray(y, np.int64).reshape(-1)
+        nll = _KS.k_sce(_fp(dz), _ct.cast(yy.ctypes.data, _ct.POINTER(_ct.c_int64)),
+                        B * T, V, np.float32(1.0 / (B * T)))
+        return nll, dz
     z = logits - logits.max(-1, keepdims=True)
     e = np.exp(z); p = e / e.sum(-1, keepdims=True)
-    B, T, V = logits.shape
     nll = -np.log(p.reshape(-1, V)[np.arange(B*T), y.reshape(-1)] + 1e-12).mean()
     dz = p
     dz.reshape(-1, V)[np.arange(B*T), y.reshape(-1)] -= 1.0
@@ -513,7 +564,7 @@ def main():
         for _ in range(iters):
             x, y = batch(va, rr)
             H, _ = model.forward(x)
-            l, _ = softmax_ce(model.logits(H), y)
+            l, _ = softmax_ce(model.logits(H), y, destroy=True)
             tot += l
         return tot / iters
 
@@ -526,7 +577,7 @@ def main():
         x, y = batch(tr, rng)
         H, caches = model.forward(x)
         lg = model.logits(H)
-        loss, dz = softmax_ce(lg, y)
+        loss, dz = softmax_ce(lg, y, destroy=(teacher is None))
         if teacher is not None:
             Ht, _ = teacher.forward(x)
             lgt = Ht @ teacher.p.d["E"].T
