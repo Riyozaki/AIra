@@ -710,7 +710,7 @@ def main():
     tr = np.load(f"{ROOT}/{args.data}/train.npy").astype(np.int64)
     va = np.load(f"{ROOT}/{args.data}/val.npy").astype(np.int64)
     V = json.load(open(f"{ROOT}/{args.data}/meta.json"))["vocab"]
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(args.seed)
     assert not (args.erank > 0 and args.mtp > 0), "erank+mtp пока не комбинируются"
     model = NanoGPT(V, D=args.dim, L=args.layers, ff=args.ff, kind=args.kind, adr_kf=args.adr, moe_e=args.moe, mtp_w=args.mtp, erank=args.erank, kronfc=args.kronfc)
     teacher = None
@@ -871,6 +871,7 @@ def ap_parse():
     ap.add_argument("--ctx", type=int, default=96)
     ap.add_argument("--adr", type=float, default=None)
     ap.add_argument("--lr", type=float, default=6e-4)
+    ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--warmup", type=int, default=60)
     ap.add_argument("--eval_every", type=int, default=50)
     ap.add_argument("--initckpt", default=None)
