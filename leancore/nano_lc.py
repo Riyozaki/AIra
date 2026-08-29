@@ -153,6 +153,52 @@ def linear_bwd(c, dy):
     dw = x.reshape(-1, x.shape[-1]).T @ dy.reshape(-1, dy.shape[-1])
     return dy @ W.T, dw
 
+
+def kron_pair_facs(in_d, out_d):
+    """Факторы in=n1·n2 (n1>=n2), out=m1·m2 (m1<=m2), стоимость m1·n2·(n1+m2) минимальна."""
+    import math as _m
+    def facs(n, want_min_first):
+        best, bd = (n, 1), 1e9
+        for a in range(1, int(_m.sqrt(n)) + 1):
+            if n % a == 0:
+                b = n // a
+                d = (a - b) if want_min_first else (b - a)
+                if abs(a - b) < bd:
+                    bd = abs(a - b); best = (a, b) if want_min_first else (b, a)
+        return best
+    n2, n1 = facs(in_d, False)     # n1 — больший фактор входа
+    m1, m2 = facs(out_d, True)     # m1 — меньший фактор выхода
+    return n1, n2, m1, m2
+
+def kron_fwd(x2d, As, Bs):
+    """x2d (P, n1·n2) → (y (P, m1·m2), cache). Y = Σ_k A_k X B_kᵀ, vec row-major с обеих сторон."""
+    P = x2d.shape[0]
+    n1, n2 = As[0].shape[1], Bs[0].shape[1]
+    m1, m2 = As[0].shape[0], Bs[0].shape[0]
+    X = x2d.reshape(P, n1, n2)
+    Y = np.zeros((P, m1, m2), x2d.dtype)
+    for A, B in zip(As, Bs):
+        t = X.transpose(0, 2, 1).reshape(P * n2, n1) @ A.T
+        t = t.reshape(P, n2, m1).transpose(0, 2, 1).reshape(P * m1, n2) @ B.T
+        Y += t.reshape(P, m1, m2)
+    return Y.reshape(P, m1 * m2), (X, As, Bs)
+
+def kron_bwd(c, dy2d):
+    """dy2d (P, m1·m2) → (dX (P, n1·n2), [dA_k], [dB_k]).
+    dA_k = Σ_p G B Xᵀ;  dB_k = Σ_p Gᵀ A X;  dX = Σ_k Aᵀ G B."""
+    X, As, Bs = c
+    P = X.shape[0]
+    m1, m2 = As[0].shape[0], Bs[0].shape[0]
+    G = dy2d.reshape(P, m1, m2)
+    Gt = G.transpose(0, 2, 1)
+    dX = np.zeros_like(X)
+    dAs, dBs = [], []
+    for A, B in zip(As, Bs):
+        dAs.append(np.einsum('pmr,pnr->mn', G @ B, X))
+        dBs.append(np.einsum('pmn,pnq->mq', Gt @ A, X))
+        dX += A.T @ G @ B
+    return dX.reshape(P, X.shape[1] * X.shape[2]), dAs, dBs
+
 def softmax_ce(logits, y, destroy=False):      # logits (B,T,V), y (B,T) -> (loss, dlogits); destroy=True → пишем dz поверх logits
     B, T, V = logits.shape
     if _KS is not None and logits.dtype == np.float32:
@@ -253,9 +299,9 @@ def ema_mix_bwd(c, dY):
 
 # ---------------------------------------------------------------- model
 class NanoGPT:
-    def __init__(self, V, D=192, L=4, h=6, ff=576, T=96, kind="attn", adr_kf=None, moe_e=1, mtp_w=0.0, erank=0):  # noqa
+    def __init__(self, V, D=192, L=4, h=6, ff=576, T=96, kind="attn", adr_kf=None, moe_e=1, mtp_w=0.0, erank=0, kronfc=0):  # noqa
         self.V, self.D, self.L, self.h, self.T, self.ff, self.moe_e, self.mtp_w = V, D, L, h, T, ff, moe_e, mtp_w
-        self.kind, self.adr_kf, self.erank = kind, adr_kf, erank
+        self.kind, self.adr_kf, self.erank, self.kronfc = kind, adr_kf, erank, kronfc
         p = self.p = Params()
         if erank > 0:                                  # низкоранговый tied E = U(V,r) @ P(r,D)
             sg = (0.02 ** 2 / erank) ** 0.25           # Var(E_ij) = r·σ⁴ = 0.02² → честный init
@@ -289,7 +335,17 @@ class NanoGPT:
                 p.add(f"b{i}.w1", (E, D, F2))
                 p.add(f"b{i}.w2", (E, F2, D))
             else:
-                p.add(f"b{i}.fc1", (D, ff)); p.add(f"b{i}.fc2", (ff, D))
+                if self.kronfc > 0:
+                    n1, n2, m1, m2 = kron_pair_facs(D, ff)
+                    o1, o2, q1, q2 = kron_pair_facs(ff, D)
+                    def kinit(shape):
+                        return np.random.default_rng(1).normal(0, (2.0 / (shape[0]*shape[1]))**0.25, shape).astype(f32)
+                    for k_ in range(self.kronfc):
+                        p.add(f"b{i}.fc1A{k_}", (m1, n1)); p.add(f"b{i}.fc1B{k_}", (m2, n2))
+                        p.add(f"b{i}.fc2A{k_}", (q1, o1)); p.add(f"b{i}.fc2B{k_}", (q2, o2))
+                    self._kfacs = (n1, n2, m1, m2, o1, o2, q1, q2)
+                else:
+                    p.add(f"b{i}.fc1", (D, ff)); p.add(f"b{i}.fc2", (ff, D))
             if b["routed"]:
                 p.add(f"b{i}.rw", (D,))
                 p.add(f"b{i}.rb", (), init=lambda s: np.array(1.5, f32))
@@ -318,6 +374,17 @@ class NanoGPT:
         if self.moe_e > 1:
             c[f"moe_be_{i}"] = p[f"b{i}.be"].copy()
             o2, c["moe"] = moe_ffn(ln_out2, p[f"b{i}.wr"], p[f"b{i}.be"], p[f"b{i}.w1"], p[f"b{i}.w2"], i)
+        elif self.kronfc > 0:
+            P_, B_, T_ = ln_out2.shape[0] * ln_out2.shape[1], ln_out2.shape[0], ln_out2.shape[1]
+            n1, n2, m1, m2, o1, o2, q1, q2 = self._kfacs
+            z1, c["kron1"] = kron_fwd(ln_out2.reshape(P_, self.D),
+                                      [p[f"b{i}.fc1A{k_}"] for k_ in range(self.kronfc)],
+                                      [p[f"b{i}.fc1B{k_}"] for k_ in range(self.kronfc)])
+            g1, c["gelu"] = gelu(z1.reshape(B_, T_, self.ff))
+            z2, c["kron2"] = kron_fwd(g1.reshape(P_, self.ff),
+                                      [p[f"b{i}.fc2A{k_}"] for k_ in range(self.kronfc)],
+                                      [p[f"b{i}.fc2B{k_}"] for k_ in range(self.kronfc)])
+            o2 = z2.reshape(B_, T_, self.D)          # fc2-cache не нужен — kron bwd свой
         else:
             g1, c["gelu"] = gelu(ln_out2 @ p[f"b{i}.fc1"])
             o2, c["fc2"] = linear(g1, p[f"b{i}.fc2"])
@@ -331,6 +398,17 @@ class NanoGPT:
             dxm, dwr, dbe, dw1, dw2 = moe_ffn_bwd(c["moe"], dD)
             g[f"b{i}.wr"] += dwr; g[f"b{i}.w1"] += dw1; g[f"b{i}.w2"] += dw2
             dln2 = dxm
+        elif self.kronfc > 0:
+            P_ = dD.shape[0] * dD.shape[1]
+            n1, n2, m1, m2, o1, o2, q1, q2 = self._kfacs
+            dX2f, dA2s, dB2s = kron_bwd(c["kron2"], dD.reshape(P_, self.D))
+            for k_ in range(self.kronfc):
+                g[f"b{i}.fc2A{k_}"] += dA2s[k_]; g[f"b{i}.fc2B{k_}"] += dB2s[k_]
+            dpre = gelu_bwd(c["gelu"], dX2f.reshape(dD.shape[0], dD.shape[1], self.ff))
+            dln24, dA1s, dB1s = kron_bwd(c["kron1"], dpre.reshape(P_, self.ff))
+            for k_ in range(self.kronfc):
+                g[f"b{i}.fc1A{k_}"] += dA1s[k_]; g[f"b{i}.fc1B{k_}"] += dB1s[k_]
+            dln2 = dln24.reshape(dD.shape[0], dD.shape[1], self.D)
         else:
             dX2f, dW2 = linear_bwd(c["fc2"], dD); g[f"b{i}.fc2"] += dW2
             dpre = gelu_bwd(c["gelu"], dX2f)
@@ -634,7 +712,7 @@ def main():
     V = json.load(open(f"{ROOT}/{args.data}/meta.json"))["vocab"]
     rng = np.random.default_rng(42)
     assert not (args.erank > 0 and args.mtp > 0), "erank+mtp пока не комбинируются"
-    model = NanoGPT(V, D=args.dim, L=args.layers, ff=args.ff, kind=args.kind, adr_kf=args.adr, moe_e=args.moe, mtp_w=args.mtp, erank=args.erank)
+    model = NanoGPT(V, D=args.dim, L=args.layers, ff=args.ff, kind=args.kind, adr_kf=args.adr, moe_e=args.moe, mtp_w=args.mtp, erank=args.erank, kronfc=args.kronfc)
     teacher = None
     if args.distill:
         teacher = NanoGPT(V)
@@ -781,6 +859,7 @@ def ap_parse():
     ap.add_argument("--wema", type=float, default=0.0, help="decay EMA весов для оценки (0=выкл)")
     ap.add_argument("--mulr", type=float, default=0.02)
     ap.add_argument("--moe", type=int, default=1, help="E экспертов top-1 (DeepSeek aux-loss-free); 1 = dense FFN")
+    ap.add_argument("--kronfc", type=int, default=0, help="K кронекер-членов в FFN fc1/fc2 (0=dense)")
     ap.add_argument("--mtp", type=float, default=0.0, help="вес MTP-aux головы t+2 (DeepSeek); 0 — выкл")
     ap.add_argument("--dim", type=int, default=192); ap.add_argument("--layers", type=int, default=4)
     ap.add_argument("--ff", type=int, default=576)
