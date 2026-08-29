@@ -552,8 +552,9 @@ class MuonW:
     """Muon (Keller Jordan): momentum + Newton–Schulz ортогонализация для 2D-матриц (~35% к скорости NanoGPT).
     1D/скаляры/эмбеддинг/pos остаются на Adam (стандартная практика)."""
     NS_COEF = (3.4445, -4.7750, 2.0315)
-    def __init__(self, params, lr=6e-4, mulr=0.02, mom=0.95, wd=0.1, ns=5, eps=1e-8):
+    def __init__(self, params, lr=6e-4, mulr=0.02, mom=0.95, wd=0.1, ns=5, eps=1e-8, wdmask=False):
         self.p = params; self.lr0, self.mulr, self.mom, self.wd, self.ns, self.eps = lr, mulr, mom, wd, ns, eps
+        self.wdmask = wdmask
         self.muon_keys = {k for k, v in params.d.items()
                           if v.ndim == 2 and min(v.shape) >= 16 and k not in ("E", "U", "pos")}
         self.adam_keys = set(params.d) - self.muon_keys
@@ -582,14 +583,16 @@ class MuonW:
             gu = g * (1 - self.mom) + self.mom * self.mb[k]          # nesterov
             o = self._ns5(gu, self.ns, self.eps)
             scale = max(1.0, o.shape[0] / o.shape[1]) ** 0.5
-            self.p.d[k] -= self.mulr * scale * o + self.wd * lr * self.p.d[k]
+            wdk = 0.0 if (self.wdmask and self.p.d[k].ndim < 2) else self.wd
+            self.p.d[k] -= self.mulr * scale * o + wdk * lr * self.p.d[k]
         for k in self.adam_keys:
             g = self.p.g[k]
             self.m[k] = 0.9 * self.m[k] + 0.1 * g
             self.v[k] = 0.95 * self.v[k] + 0.05 * g * g
             mh = self.m[k] / (1 - 0.9 ** self.t)
             vh = self.v[k] / (1 - 0.95 ** self.t)
-            self.p.d[k] -= lr * (mh / (np.sqrt(vh) + self.eps) + self.wd * self.p.d[k])
+            wda = 0.0 if (self.wdmask and (self.p.d[k].ndim < 2 or k in ("E", "U", "P"))) else self.wd
+            self.p.d[k] -= lr * (mh / (np.sqrt(vh) + self.eps) + wda * self.p.d[k])
         self.p.zero()
 
 
@@ -727,7 +730,7 @@ def main():
         print(f"[{args.tag}] init from {args.initckpt}", flush=True)
     nparams = sum(v.size for v in model.p.d.values())
     print(f"[{args.tag}] nano-{args.kind} params={nparams:,}", flush=True)
-    if args.opt == "muon": opt = MuonW(model.p, lr=args.lr, mulr=args.mulr)
+    if args.opt == "muon": opt = MuonW(model.p, lr=args.lr, mulr=args.mulr, wdmask=bool(args.wdmask))
     else: opt = AdamW(model.p, lr=args.lr, wdmask=bool(args.wdmask))
 
     ew = None

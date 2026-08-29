@@ -1,0 +1,20 @@
+[L_mu6k_1500s1] nano-ema params=4,127,616
+[MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (12 шт), adam: 28 шт
+[L_mu6k_1500s1] sampled softmax: K=512 негативов/шаг, unigram-предложение, logQ-коррекция; вал — полный softmax
+{"step": 0, "train_loss": 9.6431, "val_loss": 9.671, "val_ppl": 15851.54, "wall": 3.4, "tok_s": 674.4, "tokens": 2304}
+{"step": 100, "train_loss": 6.179, "val_loss": 6.1132, "val_ppl": 451.8, "wall": 67.0, "tok_s": 3475.6, "tokens": 232704}
+{"step": 200, "train_loss": 5.5802, "val_loss": 5.6727, "val_ppl": 290.8, "wall": 131.6, "tok_s": 3519.4, "tokens": 463104}
+{"step": 300, "train_loss": 5.7737, "val_loss": 5.4952, "val_ppl": 243.52, "wall": 206.2, "tok_s": 3363.0, "tokens": 693504}
+{"step": 400, "train_loss": 5.3544, "val_loss": 5.3909, "val_ppl": 219.4, "wall": 272.6, "tok_s": 3389.4, "tokens": 923904}
+{"step": 500, "train_loss": 5.3219, "val_loss": 5.335, "val_ppl": 207.47, "wall": 338.0, "tok_s": 3415.2, "tokens": 1154304}
+{"step": 600, "train_loss": 5.1402, "val_loss": 5.2928, "val_ppl": 198.91, "wall": 403.7, "tok_s": 3429.7, "tokens": 1384704}
+{"step": 700, "train_loss": 5.1399, "val_loss": 5.2533, "val_ppl": 191.2, "wall": 469.2, "tok_s": 3442.3, "tokens": 1615104}
+{"step": 800, "train_loss": 5.0789, "val_loss": 5.2272, "val_ppl": 186.28, "wall": 533.7, "tok_s": 3457.9, "tokens": 1845504}
+{"step": 900, "train_loss": 4.9123, "val_loss": 5.1926, "val_ppl": 179.94, "wall": 597.4, "tok_s": 3474.6, "tokens": 2075904}
+{"step": 1000, "train_loss": 5.1248, "val_loss": 5.1859, "val_ppl": 178.74, "wall": 660.4, "tok_s": 3492.5, "tokens": 2306304}
+{"step": 1100, "train_loss": 5.0814, "val_loss": 5.1561, "val_ppl": 173.48, "wall": 723.0, "tok_s": 3508.8, "tokens": 2536704}
+{"step": 1200, "train_loss": 4.9296, "val_loss": 5.1416, "val_ppl": 170.98, "wall": 785.7, "tok_s": 3521.9, "tokens": 2767104}
+{"step": 1300, "train_loss": 4.9486, "val_loss": 5.1255, "val_ppl": 168.26, "wall": 849.9, "tok_s": 3526.9, "tokens": 2997504}
+{"step": 1400, "train_loss": 4.7617, "val_loss": 5.1144, "val_ppl": 166.4, "wall": 928.5, "tok_s": 3476.4, "tokens": 3227904}
+{"step": 1499, "train_loss": 5.0456, "val_loss": 5.099, "val_ppl": 163.86, "wall": 1011.5, "tok_s": 3416.8, "tokens": 3456000}
+SUMMARY {"tag": "L_mu6k_1500s1", "kind": "ema", "params": 4127616, "tokens": 3456000, "wall_s": 1011.5, "tok_s": 3416.7, "final_val_loss": 5.099, "final_val_ppl": 163.86}
