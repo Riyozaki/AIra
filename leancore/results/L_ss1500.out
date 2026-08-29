@@ -1,0 +1,11 @@
+[L_ss1500] nano-ema params=2,592,195
+[MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (12 шт), adam: 34 шт
+[L_ss1500] sampled softmax: K=512 негативов/шаг, unigram-предложение, logQ-коррекция; вал — полный softmax
+{"step": 0, "train_loss": 8.8347, "val_loss": 8.9983, "val_ppl": 8089.23, "wall": 2.2, "tok_s": 1060.1, "tokens": 2304}
+{"step": 250, "train_loss": 5.144, "val_loss": 5.1582, "val_ppl": 173.86, "wall": 113.3, "tok_s": 5102.8, "tokens": 578304}
+{"step": 500, "train_loss": 4.9198, "val_loss": 4.9544, "val_ppl": 141.8, "wall": 227.5, "tok_s": 5074.1, "tokens": 1154304}
+{"step": 750, "train_loss": 4.8471, "val_loss": 4.86, "val_ppl": 129.02, "wall": 340.2, "tok_s": 5085.9, "tokens": 1730304}
+{"step": 1000, "train_loss": 4.7719, "val_loss": 4.8078, "val_ppl": 122.47, "wall": 461.7, "tok_s": 4994.8, "tokens": 2306304}
+{"step": 1250, "train_loss": 4.6212, "val_loss": 4.7791, "val_ppl": 119.0, "wall": 583.7, "tok_s": 4937.6, "tokens": 2882304}
+{"step": 1499, "train_loss": 4.6152, "val_loss": 4.7716, "val_ppl": 118.1, "wall": 702.1, "tok_s": 4922.4, "tokens": 3456000}
+SUMMARY {"tag": "L_ss1500", "kind": "ema", "params": 2592195, "tokens": 3456000, "wall_s": 702.1, "tok_s": 4922.2, "final_val_loss": 4.7716, "final_val_ppl": 118.1}

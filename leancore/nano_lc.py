@@ -11,8 +11,23 @@ CLI: python3 nano_lc.py --kind ema --tag run --steps 500 [--adr 0.55] [--initckp
 import os, sys, json, math, time, argparse
 import numpy as np
 
+PROF = {}      # in-situ профайлер: NANOLC_PROF=1 → медианы по секциям в конце
+def _tick(sec, t0):
+    PROF.setdefault(sec, []).append(time.process_time_ns() - t0)
+    return time.process_time_ns()
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 f32 = np.float32
+
+def scatter_add_rows(dst, ids, src):
+    """dst[ids] += src с ДУБЛИКАТАМИ в ids (векторно: сорт + reduceat; замена медленному np.add.at).
+    ids (N,) int, src (N,D) — суммируется по одинаковым id и пишется одной fancy-записью."""
+    ids = ids.reshape(-1)
+    src2 = src.reshape(ids.shape[0], -1)
+    order = np.argsort(ids, kind="stable")
+    sids = ids[order]
+    bounds = np.flatnonzero(np.r_[True, sids[1:] != sids[:-1]])
+    dst[sids[bounds]] += np.add.reduceat(src2[order], bounds)
 
 class Params:
     def __init__(self): self.d, self.g = {}, {}
@@ -100,6 +115,28 @@ def layernorm_bwd(c, dy):
     v = dy * g                                                   # γ ДО редукций
     dx = (istd / N) * (N * v - v.sum(-1, keepdims=True) - xhat * (v * xhat).sum(-1, keepdims=True))
     return dx, dg, db
+
+# ---------------- sampled softmax (batch-candidates + bias-correction Q_c = 1−(1−q)^K) -------------
+# Голова H@E[cand].T по m ≪ V кандидатам; логиты корректируются −logQ_c (RAW/Jean-style):
+# E[∂L'/∂z] ≈ ∂L/∂z при общем наборе кандидатов на батч. Вал — всегда полный softmax.
+
+def sampled_ce(H, y, E, cand, logcor, Ec=None):
+    """H (B,T,D), y (B,T), cand (m,) sorted unique ⊇ targets, logcor (m,) = logQ.
+    → (loss, (dz, cand, Ec)); dz — градиент по скорректированным логитам (p−onehot)/(B·T).
+    Ec можно передать посчитанным (низкоранговый случай: U[cand]@P)."""
+    if Ec is None:
+        Ec = E[cand]                                 # (m,D)
+    lg = H @ Ec.T                                    # (B,T,m)
+    lg = lg - logcor[None, None, :]
+    lbl = np.searchsorted(cand, y)
+    loss, dz = softmax_ce(lg, lbl, destroy=True)
+    return loss, (dz, cand, Ec)
+
+def sampled_ce_bwd(c, H):
+    dz, cand, Ec = c
+    dH = dz @ Ec                                     # (B,T,D)
+    dEc = dz.reshape(-1, dz.shape[-1]).T @ H.reshape(-1, H.shape[-1])   # (m,D)
+    return dH, dEc
 
 ACTQ8 = False   # QAT-режим: квантование активаций int8 (динамический absmax на строку) перед матмулом
 
@@ -216,11 +253,16 @@ def ema_mix_bwd(c, dY):
 
 # ---------------------------------------------------------------- model
 class NanoGPT:
-    def __init__(self, V, D=192, L=4, h=6, ff=576, T=96, kind="attn", adr_kf=None, moe_e=1, mtp_w=0.0):  # noqa
+    def __init__(self, V, D=192, L=4, h=6, ff=576, T=96, kind="attn", adr_kf=None, moe_e=1, mtp_w=0.0, erank=0):  # noqa
         self.V, self.D, self.L, self.h, self.T, self.ff, self.moe_e, self.mtp_w = V, D, L, h, T, ff, moe_e, mtp_w
-        self.kind, self.adr_kf = kind, adr_kf
+        self.kind, self.adr_kf, self.erank = kind, adr_kf, erank
         p = self.p = Params()
-        p.add("E", (V, D)); p.add("pos", (T, D))
+        if erank > 0:                                  # низкоранговый tied E = U(V,r) @ P(r,D)
+            sg = (0.02 ** 2 / erank) ** 0.25           # Var(E_ij) = r·σ⁴ = 0.02² → честный init
+            p.add("U", (V, erank), std=sg); p.add("P", (erank, D), std=sg)
+        else:
+            p.add("E", (V, D))
+        p.add("pos", (T, D))
         self.blocks = []
         for i in range(L):
             kind_i = "attn" if (kind == "attn" or (kind == "hybrid" and i == 0)) else ("delta" if kind == "delta" else "ema")
@@ -314,7 +356,10 @@ class NanoGPT:
         """→ (H после финального LN, caches)"""
         p = self.p.d
         B, T = ids.shape
-        H = p["E"][ids] + p["pos"][None, :T]
+        if self.erank > 0:
+            H = p["U"][ids] @ p["P"] + p["pos"][None, :T]
+        else:
+            H = p["E"][ids] + p["pos"][None, :T]
         blocks_c = []
         for i, b in enumerate(self.blocks):
             bc = {}
@@ -339,15 +384,40 @@ class NanoGPT:
         out, c_lnf = layernorm(H, p["lnfg"], p["lnfb"])
         return out, (ids, T, blocks_c, c_lnf)
 
-    def logits(self, H): return H @ self.p.d["E"].T                   # tied head
+    def logits(self, H):
+        if self.erank > 0:
+            return (H @ self.p.d["P"].T) @ self.p.d["U"].T            # tied lowrank head
+        return H @ self.p.d["E"].T                   # tied head
 
-    def backward(self, H, caches, dlogits, dH_aux=None):
+    def backward(self, H, caches, dlogits=None, dH_aux=None, head_cache=None):
         p, g = self.p.d, self.p.g
         ids, T, blocks_c, c_lnf = caches
-        g["E"] += dlogits.reshape(-1, self.V).T @ H.reshape(-1, self.D)
-        dH = dlogits @ p["E"]
+        _t = time.process_time_ns()
+        if head_cache is not None:                      # sampled softmax: разреженный путь
+            cand, dz, Ec = head_cache
+            if self.erank > 0:                          # Ec = U[cand]@P был форвард-копией; градиент по U,P
+                PH = H @ p["P"].T                       # (B,T,r)
+                Uc = p["U"][cand]                       # (m,r)
+                g["U"][cand] += dz.reshape(-1, dz.shape[-1]).T @ PH.reshape(-1, self.erank)
+                dPH = dz @ Uc                           # (B,T,r)
+                g["P"] += dPH.reshape(-1, self.erank).T @ H.reshape(-1, self.D)
+                dH = dPH @ p["P"]
+            else:
+                g["E"][cand] += dz.reshape(-1, dz.shape[-1]).T @ H.reshape(-1, self.D)   # cand уникален → fancy-add
+                dH = dz @ Ec
+        elif self.erank > 0:                            # полная голова, низкий ранг
+            PH = H @ p["P"].T
+            g["U"] += dlogits.reshape(-1, self.V).T @ PH.reshape(-1, self.erank)
+            dPH = dlogits @ p["U"]                      # (B,T,r)
+            g["P"] += dPH.reshape(-1, self.erank).T @ H.reshape(-1, self.D)
+            dH = dPH @ p["P"]
+        else:
+            g["E"] += dlogits.reshape(-1, self.V).T @ H.reshape(-1, self.D)
+            dH = dlogits @ p["E"]
+        _t = _tick("bwd_head", _t)
         if dH_aux is not None: dH = dH + dH_aux            # MTP: aux-градиент уровня H (после lnf)
         dH, dg, db = layernorm_bwd(c_lnf, dH); g["lnfg"] += dg; g["lnfb"] += db
+        _t = _tick("bwd_body", _t)
         for i in reversed(range(self.L)):
             bc = blocks_c[i]; b = self.blocks[i]
             if b["routed"]:
@@ -367,8 +437,16 @@ class NanoGPT:
                 continue
             dX = self._arm_backward(bc["arm"], dH, i, b)
             dH = dH + dX
-        np.add.at(g["E"], ids, dH)          # градиент эмбеддинга (lookup-путь)
+        _t = _tick("bwd_blocks", _t)
+        if self.erank > 0:                              # lookup-путь: x0 = U[ids]@P
+            Ui = p["U"][ids].reshape(-1, self.erank)
+            dHf = dH.reshape(-1, self.D)
+            scatter_add_rows(g["U"], ids, dHf @ p["P"].T)
+            g["P"] += Ui.T @ dHf
+        else:
+            scatter_add_rows(g["E"], ids, dH)   # градиент эмбеддинга (lookup-путь, векторный)
         g["pos"] += dH.sum(0)
+        _t = _tick("bwd_embscat", _t)
         return H
 
 class AdamW:
@@ -395,7 +473,7 @@ class MuonW:
     def __init__(self, params, lr=6e-4, mulr=0.02, mom=0.95, wd=0.1, ns=5, eps=1e-8):
         self.p = params; self.lr0, self.mulr, self.mom, self.wd, self.ns, self.eps = lr, mulr, mom, wd, ns, eps
         self.muon_keys = {k for k, v in params.d.items()
-                          if v.ndim == 2 and min(v.shape) >= 16 and k not in ("E", "pos")}
+                          if v.ndim == 2 and min(v.shape) >= 16 and k not in ("E", "U", "pos")}
         self.adam_keys = set(params.d) - self.muon_keys
         self.mb = {k: np.zeros_like(v) for k, v in params.d.items() if k in self.muon_keys}
         self.m = {k: np.zeros_like(params.d[k]) for k in self.adam_keys}
@@ -551,7 +629,8 @@ def main():
     va = np.load(f"{ROOT}/{args.data}/val.npy").astype(np.int64)
     V = json.load(open(f"{ROOT}/{args.data}/meta.json"))["vocab"]
     rng = np.random.default_rng(42)
-    model = NanoGPT(V, D=args.dim, L=args.layers, ff=args.ff, kind=args.kind, adr_kf=args.adr, moe_e=args.moe, mtp_w=args.mtp)
+    assert not (args.erank > 0 and args.mtp > 0), "erank+mtp пока не комбинируются"
+    model = NanoGPT(V, D=args.dim, L=args.layers, ff=args.ff, kind=args.kind, adr_kf=args.adr, moe_e=args.moe, mtp_w=args.mtp, erank=args.erank)
     teacher = None
     if args.distill:
         teacher = NanoGPT(V)
@@ -568,6 +647,16 @@ def main():
     print(f"[{args.tag}] nano-{args.kind} params={nparams:,}", flush=True)
     if args.opt == "muon": opt = MuonW(model.p, lr=args.lr, mulr=args.mulr)
     else: opt = AdamW(model.p, lr=args.lr)
+
+    # ---- sampled softmax: предложение q = unigram(train), коррекция Q_c = 1−(1−q)^K (with-replacement)
+    ssq = None
+    if args.ssk > 0:
+        assert teacher is None, "ssk: distill пока не комбинируется"
+        assert args.mtp == 0, "ssk: mtp пока не комбинируется"
+        cnt = np.bincount(tr, minlength=V).astype(np.float64) + 1.0
+        ssq = cnt / cnt.sum()
+        print(f"[{args.tag}] sampled softmax: K={args.ssk} негативов/шаг, unigram-предложение, "
+              f"logQ-коррекция; вал — полный softmax", flush=True)
 
     def batch(ids, rr):
         st = rr.integers(0, len(ids) - args.ctx - 1, size=args.batch)
@@ -589,10 +678,26 @@ def main():
     for step in range(args.steps):
         lr = args.lr * min((step + 1) / args.warmup,
               0.1 + 0.45 * (1 + math.cos(math.pi * max(0, step - args.warmup) / max(1, args.steps - args.warmup))))
+        _t = time.process_time_ns()
         x, y = batch(tr, rng)
+        _t = _tick("batch", _t)
         H, caches = model.forward(x)
-        lg = model.logits(H)
-        loss, dz = softmax_ce(lg, y, destroy=(teacher is None))
+        _t = _tick("fwd", _t)
+        head_cache = None
+        use_ss = ssq is not None and step < args.steps * (1.0 - args.ssfull)
+        if use_ss:
+            neg = rng.choice(V, size=args.ssk, replace=True, p=ssq)
+            cand = np.union1d(np.unique(y), neg).astype(np.int64)
+            logQ = np.log1p(-np.power(1.0 - ssq[cand], args.ssk))      # log(1−(1−q)^K)
+            logQ[np.isin(cand, y)] = 0.0                               # цели всегда в наборе
+            Ec0 = (model.p.d["U"][cand] @ model.p.d["P"]) if model.erank > 0 else None
+            loss, (dz, cand, Ec) = sampled_ce(H, y, model.p.d["E"] if model.erank == 0 else Ec0, cand, logQ, Ec=Ec0)
+            head_cache = (cand, dz, Ec)
+            dz = None
+        else:
+            lg = model.logits(H)
+            loss, dz = softmax_ce(lg, y, destroy=(teacher is None))
+        _t = _tick("head_fwd", _t)
         if teacher is not None:
             Ht, _ = teacher.forward(x)
             lgt = Ht @ teacher.p.d["E"].T
@@ -618,12 +723,14 @@ def main():
             dzn, dWmtp = linear_bwd(cwm, args.mtp * dzm); model.p.g["Wmtp"] += dWmtp
             dH_aux, dgm, dbm = layernorm_bwd(clnm, dzn)
             model.p.g["lnm_g"] += dgm; model.p.g["lnm_b"] += dbm
-        model.backward(H, caches, dz, dH_aux=dH_aux)
+        model.backward(H, caches, dz, dH_aux=dH_aux, head_cache=head_cache)
+        _t = _tick("bwd_total", _t)
         if args.moe > 1:
             for i in range(model.L):
                 be = model.p.d[f"b{i}.be"]
                 be += 0.02 * (0.25 - MOE_STATS[i])         # bias ↑ недогруженным экспертам
         opt.step(lr)
+        _t = _tick("opt", _t)
         toks += x.size
         if step % args.eval_every == 0 or step == args.steps - 1:
             vl = vloss(); el = time.time() - t0
@@ -635,6 +742,13 @@ def main():
     print("SUMMARY " + json.dumps(dict(tag=args.tag, kind=args.kind, params=nparams,
         tokens=toks, wall_s=round(time.time() - t0, 1), tok_s=round(toks / (time.time() - t0), 1),
         final_val_loss=rec["val_loss"], final_val_ppl=rec["val_ppl"])), flush=True)
+    if os.environ.get("NANOLC_PROF"):
+        tot = sum(np.median(v) for v in PROF.values()) / 1e6
+        print("PROF медианы ms/шаг:", flush=True)
+        for k in sorted(PROF, key=lambda k: -np.median(PROF[k])):
+            v = np.median(PROF[k]) / 1e6
+            print(f"  {k:12s} {v:8.1f} ({100*v/tot:.1f}%)", flush=True)
+        print(f"  {'ИТОГО':12s} {tot:8.1f}", flush=True)
 
 def ap_parse():
     ap = argparse.ArgumentParser()
@@ -657,6 +771,9 @@ def ap_parse():
     ap.add_argument("--eval_every", type=int, default=50)
     ap.add_argument("--initckpt", default=None)
     ap.add_argument("--data", default="data/prep")
+    ap.add_argument("--ssk", type=int, default=0, help="sampled softmax: K негативов/шаг (0 = полный CE)")
+    ap.add_argument("--ssfull", type=float, default=0.0, help="доля финальных шагов с полным CE (аннил)")
+    ap.add_argument("--erank", type=int, default=0, help="низкоранговый tied-эмбеддинг U(V,r)@P(r,D); 0 = выкл")
     return ap.parse_args()
 
 if __name__ == "__main__":
