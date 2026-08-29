@@ -450,8 +450,11 @@ class NanoGPT:
         return H
 
 class AdamW:
-    def __init__(self, params, lr=6e-4, b1=0.9, b2=0.95, wd=0.1, eps=1e-8):
+    def __init__(self, params, lr=6e-4, b1=0.9, b2=0.95, wd=0.1, eps=1e-8, wdmask=False):
         self.p = params; self.b1, self.b2, self.wd, self.eps = b1, b2, wd, eps
+        # wdmask: decoupled-wd только на скрытых 2D-матрицах; НЕ на tied-эмбеддинге "E",
+        # LN-gains/биасах/скалярах (ndim<2). Классическая правка AdamW → обычно +стабильность.
+        self.wdmask = wdmask
         self.m = {k: np.zeros_like(v) for k, v in params.d.items()}
         self.v = {k: np.zeros_like(v) for k, v in params.d.items()}
         self.t = 0
@@ -463,7 +466,8 @@ class AdamW:
             self.v[k] = self.b2 * self.v[k] + (1 - self.b2) * g * g
             mh = self.m[k] / (1 - self.b1 ** self.t)
             vh = self.v[k] / (1 - self.b2 ** self.t)
-            self.p.d[k] -= lr * (mh / (np.sqrt(vh) + self.eps) + self.wd * self.p.d[k])
+            wd = 0.0 if (self.wdmask and (self.p.d[k].ndim < 2 or k in ("E", "U", "P"))) else self.wd
+            self.p.d[k] -= lr * (mh / (np.sqrt(vh) + self.eps) + wd * self.p.d[k])
         self.p.zero()
 
 class MuonW:
@@ -646,7 +650,13 @@ def main():
     nparams = sum(v.size for v in model.p.d.values())
     print(f"[{args.tag}] nano-{args.kind} params={nparams:,}", flush=True)
     if args.opt == "muon": opt = MuonW(model.p, lr=args.lr, mulr=args.mulr)
-    else: opt = AdamW(model.p, lr=args.lr)
+    else: opt = AdamW(model.p, lr=args.lr, wdmask=bool(args.wdmask))
+
+    ew = None
+    if args.wema > 0:
+        ew = {k: np.zeros_like(v) for k, v in model.p.d.items()}
+        ew_corr = 1.0
+        print(f"[{args.tag}] weight-EMA decay={args.wema}: двойная оценка val (live + ema)", flush=True)
 
     # ---- sampled softmax: предложение q = unigram(train), коррекция Q_c = 1−(1−q)^K (with-replacement)
     ssq = None
@@ -731,14 +741,27 @@ def main():
                 be += 0.02 * (0.25 - MOE_STATS[i])         # bias ↑ недогруженным экспертам
         opt.step(lr)
         _t = _tick("opt", _t)
+        if ew is not None:
+            d = args.wema
+            for k in ew:
+                ew[k] = d * ew[k] + (1.0 - d) * model.p.d[k]
+            ew_corr = 1.0 - d ** (step + 1)
         toks += x.size
         if step % args.eval_every == 0 or step == args.steps - 1:
             vl = vloss(); el = time.time() - t0
             rec = dict(step=step, train_loss=round(float(loss), 4), val_loss=round(float(vl), 4),
                        val_ppl=round(float(math.exp(vl)), 2), wall=round(el, 1),
                        tok_s=round(toks / el, 1), tokens=toks)
+            if ew is not None:
+                bk = {k: model.p.d[k].copy() for k in ew}
+                for k in ew: model.p.d[k][...] = ew[k] / ew_corr      # bias-коррекция EMA
+                vle = vloss()
+                for k in ew: model.p.d[k][...] = bk[k]
+                rec["val_ppl_ema"] = round(float(math.exp(vle)), 2)
             print(json.dumps(rec), flush=True); logf.write(json.dumps(rec) + "\n"); logf.flush()
     np.savez(f"{ROOT}/results/ckpt_{args.tag}.npz", **model.p.d)
+    if ew is not None:
+        np.savez(f"{ROOT}/results/ckpt_{args.tag}_ema.npz", **{k: ew[k] / ew_corr for k in ew})
     print("SUMMARY " + json.dumps(dict(tag=args.tag, kind=args.kind, params=nparams,
         tokens=toks, wall_s=round(time.time() - t0, 1), tok_s=round(toks / (time.time() - t0), 1),
         final_val_loss=rec["val_loss"], final_val_ppl=rec["val_ppl"])), flush=True)
@@ -754,6 +777,8 @@ def ap_parse():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kind", choices=["attn", "ema", "hybrid", "delta"], required=True)
     ap.add_argument("--opt", choices=["adam", "muon"], default="adam")
+    ap.add_argument("--wdmask", type=int, default=0, help="AdamW: wd только на скрытых 2D-матрицах")
+    ap.add_argument("--wema", type=float, default=0.0, help="decay EMA весов для оценки (0=выкл)")
     ap.add_argument("--mulr", type=float, default=0.02)
     ap.add_argument("--moe", type=int, default=1, help="E экспертов top-1 (DeepSeek aux-loss-free); 1 = dense FFN")
     ap.add_argument("--mtp", type=float, default=0.0, help="вес MTP-aux головы t+2 (DeepSeek); 0 — выкл")
