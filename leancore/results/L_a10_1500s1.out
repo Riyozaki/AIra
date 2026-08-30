@@ -1,0 +1,6 @@
+[L_a10_1500s1] nano-ema params=2,591,616
+[MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (12 шт), adam: 28 шт
+[L_a10_1500s1] sampled softmax: K=512 негативов/шаг, unigram-предложение, logQ-коррекция; вал — полный softmax
+{"step": 0, "train_loss": 8.9561, "val_loss": 9.0028, "val_ppl": 8126.06, "wall": 2.7, "tok_s": 838.3, "tokens": 2304}
+{"step": 100, "train_loss": 5.7573, "val_loss": 5.6607, "val_ppl": 287.36, "wall": 68.3, "tok_s": 3408.0, "tokens": 232704}
+{"step": 200, "train_loss": 5.129, "val_loss": 5.204, "val_ppl": 182.01, "wall": 144.0, "tok_s": 3215.5, "tokens": 463104}
