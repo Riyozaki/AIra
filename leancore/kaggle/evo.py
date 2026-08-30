@@ -61,6 +61,15 @@ E5. Якорный: CTRL не выбывает из топ-3 ни в одном 
 
 
 # ----------------------------------------------------------------- геном и операторы
+def _ckey(c):
+    return (c["mulr"], c["ssfull"], c["ssk"], c["ssalpha"], c["lr"])
+
+
+def _add_unique(pop, cand):
+    if all(_ckey(cand) != _ckey(c) for c in pop):
+        pop.append(cand)
+        return True
+    return False
 def to_gene(c):
     """Конфиг → точка в гене-пространстве (лог-координаты там, где масштаб мультипликативен)."""
     return dict(l_mulr=math.log(c["mulr"]), l_lr=math.log(c["lr"]),
@@ -213,10 +222,17 @@ def advance(workdir, st):
         top2 = [cjob[k] for k, _ in ranked if k != "CTRL"][:2]
         rng = hnp.random.default_rng(hnp.random.SeedSequence([MASTER_SEED, 0]))
         pop = [dict(CTRL)] + top2
-        while len(pop) < POP - 3:
-            pop.append(mutate(rng.choice(top2), rng, st["sigma"]))
-        pop += [crossover(top2[0], dict(CTRL), rng), crossover(top2[-1], dict(CTRL), rng),
-                mutate(dict(CTRL), rng, st["sigma"])]
+        guard = 0
+        while len(pop) < POP - 3 and guard < 24:
+            guard += 1
+            _add_unique(pop, mutate(rng.choice(top2), rng, st["sigma"]))
+        for cand in [crossover(top2[0], dict(CTRL), rng), crossover(top2[-1], dict(CTRL), rng),
+                     mutate(dict(CTRL), rng, st["sigma"])]:
+            _add_unique(pop, cand)
+        guard = 0
+        while len(pop) < POP and guard < 24:
+            guard += 1
+            _add_unique(pop, mutate(rng.choice(top2), rng, st["sigma"]))
         pop = pop[:POP]
         for i, c in enumerate(pop):
             if not c["name"].startswith(("CTRL", "Q")) or sum(p["name"] == c["name"] for p in pop) > 1:
@@ -253,8 +269,6 @@ def advance(workdir, st):
                                   ps=round(ps, 2), top3=top3_names))
         if gen >= GENS:
             st["stage"], st["gen"] = "final", 0
-            def _ckey(c):
-                return (c["mulr"], c["ssfull"], c["ssk"], c["ssalpha"], c["lr"])
             finalists = [dict(CTRL)]
             if st["hof"] and _ckey(st["hof"]["cfg"]) != _ckey(CTRL):
                 finalists.append(dict(st["hof"]["cfg"]))
@@ -267,9 +281,12 @@ def advance(workdir, st):
             return f"evo финиш → финал: {[f['name'] for f in finalists]}, HOF={st['hof'] and st['hof']['cfg']['name']}"
         rng = hnp.random.default_rng(hnp.random.SeedSequence([MASTER_SEED, gen]))
         pop = [dict(e) for e in elites]
-        while len(pop) < POP - 1:
-            pop.append(mutate(elites[rng.integers(0, len(elites))], rng, st["sigma"]))
-        pop.append(crossover(elites[0], elites[-1], rng))
+        guard = 0
+        while len(pop) < POP - 1 and guard < 24:
+            guard += 1
+            _add_unique(pop, mutate(elites[rng.integers(0, len(elites))], rng, st["sigma"]))
+        if not _add_unique(pop, crossover(elites[0], elites[-1], rng)):
+            _add_unique(pop, mutate(elites[0], rng, st["sigma"]))
         for i, c in enumerate(pop):
             if c["name"] != "CTRL":
                 c["name"] = f"G{gen+1}.{i}"
