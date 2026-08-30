@@ -1,7 +1,7 @@
 [L_mADR1500s42] nano-ema params=2,592,195
 [MuonW] muon: ['b0.Wm', 'b0.fc1', 'b0.fc2', 'b1.Wm']... (12 шт), adam: 34 шт
 [L_mADR1500s42] sampled softmax: K=512 негативов/шаг, unigram-предложение, logQ-коррекция; вал — полный softmax
-{"step": 0, "train_loss": 8.8209, "val_loss": 9.0075, "val_ppl": 8164.2, "wall": 2.2, "tok_s": 1029.2, "tokens": 2304}
-{"step": 100, "train_loss": 5.8771, "val_loss": 5.7433, "val_ppl": 312.08, "wall": 48.9, "tok_s": 4760.0, "tokens": 232704}
-{"step": 200, "train_loss": 5.4602, "val_loss": 5.2461, "val_ppl": 189.83, "wall": 93.7, "tok_s": 4941.4, "tokens": 463104}
-{"step": 300, "train_loss": 5.1211, "val_loss": 5.093, "val_ppl": 162.88, "wall": 139.5, "tok_s": 4971.5, "tokens": 693504}
+{"step": 0, "train_loss": 8.8209, "val_loss": 9.0075, "val_ppl": 8164.2, "wall": 2.4, "tok_s": 967.4, "tokens": 2304}
+{"step": 100, "train_loss": 5.8771, "val_loss": 5.7433, "val_ppl": 312.08, "wall": 49.7, "tok_s": 4684.7, "tokens": 232704}
+{"step": 200, "train_loss": 5.4602, "val_loss": 5.2461, "val_ppl": 189.83, "wall": 95.6, "tok_s": 4846.2, "tokens": 463104}
+{"step": 300, "train_loss": 5.1211, "val_loss": 5.093, "val_ppl": 162.88, "wall": 143.6, "tok_s": 4829.7, "tokens": 693504}
