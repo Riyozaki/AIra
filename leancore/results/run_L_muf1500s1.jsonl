@@ -5,3 +5,6 @@
 {"step": 400, "train_loss": 5.1091, "val_loss": 4.9524, "val_ppl": 141.52, "wall": 247.0, "tok_s": 3741.0, "tokens": 923904}
 {"step": 500, "train_loss": 4.8939, "val_loss": 4.9065, "val_ppl": 135.16, "wall": 309.0, "tok_s": 3735.8, "tokens": 1154304}
 {"step": 600, "train_loss": 4.8264, "val_loss": 4.877, "val_ppl": 131.24, "wall": 375.2, "tok_s": 3690.9, "tokens": 1384704}
+{"step": 700, "train_loss": 4.6009, "val_loss": 4.8421, "val_ppl": 126.73, "wall": 446.4, "tok_s": 3617.7, "tokens": 1615104}
+{"step": 800, "train_loss": 4.7567, "val_loss": 4.8261, "val_ppl": 124.73, "wall": 507.3, "tok_s": 3637.6, "tokens": 1845504}
+{"step": 900, "train_loss": 4.7513, "val_loss": 4.8156, "val_ppl": 123.42, "wall": 568.3, "tok_s": 3652.6, "tokens": 2075904}
