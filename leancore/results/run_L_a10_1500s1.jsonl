@@ -12,3 +12,5 @@
 {"step": 1100, "train_loss": 4.7055, "val_loss": 4.7386, "val_ppl": 114.27, "wall": 1361.2, "tok_s": 1863.6, "tokens": 2536704}
 {"step": 1200, "train_loss": 4.6454, "val_loss": 4.7307, "val_ppl": 113.38, "wall": 1425.3, "tok_s": 1941.4, "tokens": 2767104}
 {"step": 1300, "train_loss": 4.5677, "val_loss": 4.7207, "val_ppl": 112.25, "wall": 1491.1, "tok_s": 2010.3, "tokens": 2997504}
+{"step": 1400, "train_loss": 4.6063, "val_loss": 4.7237, "val_ppl": 112.59, "wall": 1559.2, "tok_s": 2070.3, "tokens": 3227904}
+{"step": 1499, "train_loss": 4.6117, "val_loss": 4.7157, "val_ppl": 111.69, "wall": 1624.8, "tok_s": 2127.1, "tokens": 3456000}
