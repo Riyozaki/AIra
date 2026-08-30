@@ -127,9 +127,23 @@ cells.append(code("""def run_once(engine, steps=40, seed=1):
                "--steps", str(steps), "--eval_every", "20", "--ssk", "512", "--ssfull", "0.12",
                "--seed", str(seed), "--negrng", "1", "--trunknorm", "1", "--tag", f"gate_{engine}",
                "--data", PREP]
-    r = subprocess.run(cmd, cwd=BASE, env=env, capture_output=True, text=True, timeout=3600)
+    try:
+        r = subprocess.run(cmd, cwd=BASE, env=env, capture_output=True, text=True, timeout=3600)
+    except Exception as e:
+        print(f"[gate:{engine}] запуск не удался: {type(e).__name__}: {e}")
+        return None, []
+    if r.returncode != 0:
+        print(f"[gate:{engine}] КРАШ rc={r.returncode} -- хвост stderr:")
+        print((r.stderr or "")[-2500:]); print("--- stdout ---"); print((r.stdout or "")[-1200:])
+        return None, []
     p = os.path.join(BASE, "results", f"run_gate_{engine}.jsonl")
+    if not os.path.exists(p):
+        print(f"[gate:{engine}] НЕТ {p}! rc=0, но результат не записан. stderr:")
+        print((r.stderr or "")[-2500:]); print("--- stdout ---"); print((r.stdout or "")[-1200:])
+        return None, []
     rows = [json.loads(l) for l in open(p) if l.strip().startswith("{")]
+    if not rows:
+        print(f"[gate:{engine}] jsonl пуст"); return None, []
     return rows[-1]["val_ppl"], rows
 
 NGPU, TORCH_OK = 0, False
@@ -143,17 +157,40 @@ except Exception as e:
     print("torch недоступен:", type(e).__name__)
 
 ENGINE = "numpy"
+WHY = f"cuda не видна из torch (NGPU={NGPU}) — если Accelerator включён, перезапусти ядро"
 if NGPU > 0:
-    ppl_t, rows_t = run_once("torch")
-    ppl_n, rows_n = run_once("numpy")
-    d = abs(ppl_t - ppl_n) / ppl_n
-    print(f"GATE: torch={ppl_t} numpy={ppl_n} relΔ={d:.4%}")
-    if d <= 0.02:
-        ENGINE = "torch"; print("ГЕЙТ ПРОЙДЕН → engine=torch (GPU)")
+    ppl_t, rows_t = run_once("torch", steps=40, seed=1)
+    if ppl_t is None:
+        WHY = "torch-движок упал (лог выше) — пришли мне этот вывод"
     else:
-        print("ГЕЙТ НЕ ПРОЙДЕН → engine=numpy (честный фолбэк)")
+        ppl_n, rows_n = run_once("numpy", steps=40, seed=1)
+        assert ppl_n is not None, "numpy-референс не отработал (лог выше) — стоп"
+        d = abs(ppl_t - ppl_n) / ppl_n
+        print(f"GATE: torch={ppl_t:.2f} numpy={ppl_n:.2f} relDelta={d:.3%}")
+        print(" ряды torch:", [(r["step"], r["val_ppl"]) for r in rows_t])
+        print(" ряды numpy:", [(r["step"], r["val_ppl"]) for r in rows_n])
+        if d <= 0.02:
+            ENGINE = "torch"; WHY = f"гейт пройден (relDelta={d:.2%})"
+        else:
+            WHY = f"расхождение {d:.2%} > 2% — пришли мне вывод, решу вопрос"
+_force = os.environ.get("LC_FORCE_ENGINE", "").strip().lower()
+if _force in ("torch", "numpy") and _force != ENGINE:
+    if _force == "torch" and NGPU == 0:
+        print("LC_FORCE_ENGINE=torch, но cuda нет — игнорирую форс")
+    else:
+        print(f"ФОРС: ENGINE {ENGINE} -> {_force} (по LC_FORCE_ENGINE)")
+        ENGINE = _force; WHY += " [форс]"
 NWORKERS = NGPU if ENGINE == "torch" else max(1, min(3, (os.cpu_count() or 2) - 1))
-print("ENGINE:", ENGINE, "| WORKERS:", NWORKERS)
+print("=" * 64)
+print("ENGINE:", ENGINE, "| WORKERS:", NWORKERS, "|", WHY)
+if ENGINE == "numpy" and NGPU > 0:
+    print("!" * 64)
+    print("! GPU НЕ БУДЕТ ГРУЗИТЬСЯ, но GPU-КВОТА ГОРИТ, пока Accelerator=GPU.")
+    print("! Варианты: (а) пришли мне вывод выше — чиню; или (б) Settings →")
+    print("! Accelerator → None и Run All: брекет честно поедет на CPU без")
+    print("! траты GPU-квоты (медленнее, но CPU-квоты хватит).")
+    print("!" * 64)
+print("=" * 64)
 """))
 
 cells.append(md("## 4 · Предсказания (зафиксированы ДО запуска — в PREDICTIONS.md)"))
