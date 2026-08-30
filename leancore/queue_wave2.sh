@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 
 COMMIT () {
   git add -A results 2>/dev/null || true
-  git commit -qm "wave2: $1 [авто-пуш из очереди]" 2>/dev/null || true
+  git commit -qm "wave2 progress: $1" 2>/dev/null || true
   git push -q origin HEAD:arena/01a04a42-aira 2>/dev/null && return 0
   git fetch -q origin arena/01a04a42-aira 2>/dev/null || true
   git reset -q --soft FETCH_HEAD 2>/dev/null || true
@@ -15,6 +15,10 @@ COMMIT () {
   git commit -qm "wave2 recover: $1" 2>/dev/null || true
   git push -q origin HEAD:arena/01a04a42-aira 2>/dev/null || true
 }
+
+# фоновый толкатель частичных логов (jsonl пишется инкрементально) — потеря при сбросе ≤3 мин
+( while :; do sleep 180; COMMIT periodic; done ) & PUSHPID=$!
+trap 'kill $PUSHPID 2>/dev/null' EXIT
 
 # 1-2. α-пара @1500, seed 1, muon, рецепт чемпиона (новый детерминированный инит)
 python3 nano_lc.py --kind ema --opt muon --steps 1500 --eval_every 100 --ssk 512 --ssfull 0.12 --seed 1 --ssalpha 1.0  --tag L_a10_1500s1 > results/L_a10_1500s1.out 2>&1
