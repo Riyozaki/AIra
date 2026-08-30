@@ -26,6 +26,34 @@ INIT_SEED = 0x1EA7          # фиксированный инит для ВСЕ�
 f32 = torch.float32
 
 
+def np_paired_init(model, hnp, zlib):
+    """Битово-парный инит с numpy-тренером: тот же default_rng(crc32(имя)) и те же
+    спец-иниты (ln=ones/zeros, th=0, sc=1). Без этого torch и numpy стартовали из
+    РАЗНЫХ случайных точек и GPU-гейт измерял шум инита, а не расхождение движков
+    [измерено на Kaggle: relΔ@40шагов = 2.0044% при пороге 2.0% — внебраковочно]."""
+    import re
+    TABLE = {"ln1.weight": "ln1g", "ln1.bias": "ln1b", "ln2.weight": "ln2g", "ln2.bias": "ln2b",
+             "th": "th", "sc": "sc", "Wm": "Wm", "fc1": "fc1", "fc2": "fc2"}
+    CONST = {"th": 0.0, "sc": 1.0, "ln1g": 1.0, "ln1b": 0.0, "ln2g": 1.0, "ln2b": 0.0,
+             "lnfg": 1.0, "lnfb": 0.0}
+
+    def mapped(tname):
+        m = re.fullmatch(r"blocks\.(\d+)\.(.+)", tname)
+        if m:
+            return f"b{m.group(1)}." + TABLE[m.group(2)]
+        return {"lnf.weight": "lnfg", "lnf.bias": "lnfb"}.get(tname, tname)
+
+    with torch.no_grad():
+        for tname, p in model.named_parameters():
+            nname = mapped(tname)
+            if nname in CONST:
+                p.fill_(CONST[nname])
+                continue
+            rng = hnp.random.default_rng(zlib.crc32(nname.encode()) & 0xFFFFFFFF)
+            arr = rng.normal(0.0, 0.02, tuple(p.shape)).astype(hnp.float32)
+            p.copy_(torch.from_numpy(arr).to(p.dtype))
+
+
 # ---------------------------------------------------------------- Muon: NS5 fp32-для-sm75/sm_60
 def _ns_dtype():
     if torch.cuda.is_available():
@@ -160,6 +188,8 @@ def main():
     rng_neg = hnp.random.default_rng(args.seed * 1000003 + 17) if args.negrng else rng
 
     model = LeanCore(V).to(dev)
+    import zlib as _zlib
+    np_paired_init(model, hnp, _zlib)   # инит битово = numpy-тренер (иначе гейт меряет шум инита)
     nparams = sum(p.numel() for p in model.parameters())
     mu, ad = muon_split(model)
     mbuf = {n: torch.zeros_like(p) for n, p in mu}

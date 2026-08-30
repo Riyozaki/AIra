@@ -19,21 +19,24 @@ def code(src):
 LCXP = rd("lcxp.py")
 FORK = rd("nano_lc_kg.py")
 TT = rd("train_torch.py")
-BR = rd("bracket.py")
+EVO = rd("evo.py")
 
 cells = []
 
-cells.append(md("""# ТУРНИР КОНФИГОВ LeanCore (ASHA-брекет) · Kaggle GPU T4×2 / P100
+cells.append(md("""# EVO-ТУРНИР КОНФИГОВ LeanCore · Kaggle GPU T4×2 / P100
 
-**Что делает**: отбор конфигов по непрерывным скалярам (`mulr, ssfull, ssk, ssalpha, lr`) с честной
-методологией проекта AIra/LeanCore:
+**Что делает**: ЭВОЛЮЦИОННЫЙ поиск (не перебор) по непрерывным скалярам (`mulr, ssfull, ssk,
+ssalpha, lr`) — популяция развивается: селекция → кроссовер → мутации с адаптивным шагом σ
+(правило 1/5), зал славы (HOF) по всей истории поколений. Методология проекта AIra/LeanCore:
 
-- **CTRL** = рецепт чемпиона — шагает все рунги как референс, не выбывает
-- Парность: фиксированный инит у всех конфигов, `negrng`-разделение, сиды парные `[1,42]` → финал `[1,42,7,99]`
-- Предохранители: авто-DQ «мёртвых» (`wn<3` после шага 100), NaN; **страховочный слот** лучшего наклона
-  (ранний лидер ≠ поздний — наша измеренная ловушка ss/full)
-- Рунги 60 → 200 → 500 → 1500 шагов, квоты 12 → 5 → 3 → финал (×4 сида)
-- Всё сохраняется в `state.json` после каждой джобы → переживает таймаут сессии
+- **CTRL** = рецепт чемпиона — вечный якорный элит в каждом поколении; фитнес = ΔPPL к CTRL
+  ЭТОГО ЖЕ поколения (снимает дрейф между поколениями)
+- Парность: битово общий инит (crc32-имена; torch с v3 инициализируется ТЕМ ЖЕ numpy-потоком —
+  иначе гейт меряет шум инита, измерено: relΔ@40=2.0044% при пороге 2%), `negrng`-разделение
+- Предохранители: авто-DQ «мёртвых» (`wn<3` после шага 100), NaN; прогнозы E1–E5 зафиксированы ДО запуска
+- Стадии: **A qual** 16 конфигов @60 (отсев дна) → **B evo** популяция 8 × 3 поколения @200 ×2 сида
+  → **C final** HOF-3 + CTRL @1500 × 4 сида
+- Всё сохраняется в `evo_state.json` после каждой джобы → переживает таймаут сессии
 
 ## Как запустить
 1. **Accelerator**: Settings → GPU T4 x2 (рекомендуется) или P100. Квота ~30 GPU-часов/нед (T4×2 тратит её быстрее — следите в интерфейсе).
@@ -42,7 +45,7 @@ cells.append(md("""# ТУРНИР КОНФИГОВ LeanCore (ASHA-брекет) 
 4. По таймауту/завершении: **Save Version**. Для продолжения — новая сессия: Add Data → «Notebook Output Files» предыдущей версии → Run (state подхватится сам).
 
 ## Что вернуть в проект
-Файлы из Output: `airaw/bracket_work/SUMMARY.md`, `PREDICTIONS.md`, `state.json`, и `results/*.jsonl` (+ `ckpt_*` финалистов). Сводку вставить в чат — я разберу против PREDICTIONS и запишу в TRICKS.
+Файлы из Output: `airaw/evo_work/EVO_SUMMARY.md`, `PREDICTIONS.md`, `evo_state.json`, и `results/*.jsonl` (+ `ckpt_*` финалистов). Сводку вставить в чат — я разберу против PREDICTIONS и запишу в TRICKS.
 """))
 
 cells.append(md("## 0 · Окружение и пути"))
@@ -52,11 +55,11 @@ ON_KAGGLE = os.path.exists("/kaggle/working")
 BASE = "/kaggle/working/airaw" if ON_KAGGLE else os.path.abspath("./airaw_local")
 os.makedirs(BASE, exist_ok=True)
 print("kaggle:", ON_KAGGLE, "| BASE:", BASE, "| cpu:", os.cpu_count())
-WORK = os.path.join(BASE, "bracket_work")
+WORK = os.path.join(BASE, "evo_work")
 os.makedirs(WORK, exist_ok=True)
 """))
 
-cells.append(md("## 1 · Файлы движка (lcxp / nano_lc_kg / train_torch / bracket)"))
+cells.append(md("## 1 · Файлы движка (lcxp / nano_lc_kg / train_torch / evo)"))
 
 cells.append(code(f"open(f'{{BASE}}/lcxp.py','w').write({json.dumps(LCXP)})\nprint('lcxp.py ok')"))
 
@@ -64,7 +67,7 @@ cells.append(code(f"open(f'{{BASE}}/nano_lc_kg.py','w').write({json.dumps(FORK)}
 
 cells.append(code(f"open(f'{{BASE}}/train_torch.py','w').write({json.dumps(TT)})\nprint('train_torch.py ok')"))
 
-cells.append(code(f"open(f'{{BASE}}/bracket.py','w').write({json.dumps(BR)})\nprint('bracket.py ok')"))
+cells.append(code(f"open(f'{{BASE}}/evo.py','w').write({json.dumps(EVO)})\nprint('evo.py ok')"))
 
 cells.append(md("""## 2 · Данные (prep: train.npy / val.npy / meta.json)
 
@@ -206,7 +209,7 @@ cells.append(code("""TARGET_HOURS = 10.0   # под сессию 12ч с зап�
 
 def shout(*a): print(*a, flush=True)
 
-subprocess.run([sys.executable, os.path.join(BASE, "bracket.py"), "init",
+subprocess.run([sys.executable, os.path.join(BASE, "evo.py"), "init",
                 "--workdir", WORK, "--data", PREP], cwd=BASE, check=True)
 
 procs = []
@@ -214,11 +217,11 @@ for wid in range(NWORKERS):
     env = dict(os.environ)
     env["LC_BACKEND"] = "numpy"
     if ENGINE == "torch":
-        cmd = [sys.executable, os.path.join(BASE, "bracket.py"), "worker", "--id", str(wid),
+        cmd = [sys.executable, os.path.join(BASE, "evo.py"), "worker", "--id", str(wid),
                "--engine", "torch", "--cuda", str(wid), "--workdir", WORK, "--data", PREP]
     else:
         env["OPENBLAS_NUM_THREADS"] = str(max(1, (os.cpu_count() or 2) // max(1, NWORKERS)))
-        cmd = [sys.executable, os.path.join(BASE, "bracket.py"), "worker", "--id", str(wid),
+        cmd = [sys.executable, os.path.join(BASE, "evo.py"), "worker", "--id", str(wid),
                "--engine", "numpy", "--backend", "numpy", "--workdir", WORK, "--data", PREP]
     procs.append(subprocess.Popen(cmd, cwd=BASE, env=env))
     shout(f"воркер {wid} запущен (pid {procs[-1].pid})")
@@ -226,7 +229,7 @@ for wid in range(NWORKERS):
 t0 = time.time()
 while True:
     alive = sum(p.poll() is None for p in procs)
-    st = subprocess.run([sys.executable, os.path.join(BASE, "bracket.py"), "status",
+    st = subprocess.run([sys.executable, os.path.join(BASE, "evo.py"), "status",
                          "--workdir", WORK], cwd=BASE, capture_output=True, text=True).stdout.strip()
     shout(f"--- t+{(time.time()-t0)/3600:.2f}ч | воркеров живо: {alive}\\n{st}")
     if alive == 0:
@@ -238,7 +241,7 @@ while True:
 
 cells.append(md("## 6 · Итоги и артефакты"))
 
-cells.append(code("""subprocess.run([sys.executable, os.path.join(BASE, "bracket.py"), "summary",
+cells.append(code("""subprocess.run([sys.executable, os.path.join(BASE, "evo.py"), "summary",
                 "--workdir", WORK], cwd=BASE, check=True)
 print("=== файлы для скачивания/продолжения ===")
 for f in sorted(glob.glob(os.path.join(WORK, "*")) + glob.glob(os.path.join(BASE, "results", "*.jsonl"))
@@ -250,13 +253,13 @@ cells.append(md("""## 7 · Продолжение после таймаута
 
 1. **Save Version** (все файлы Output сохранятся).
 2. В новой сессии этого же ноутбука: **Add Data → Notebook Output Files** предыдущей версии.
-   `init` сам найдёт `state.json` в `/kaggle/input/*/` и продолжит с места обрыва
+   `init` сам найдёт `evo_state.json` в `/kaggle/input/*/` и продолжит с места обрыва
    (зависшие джобы вернутся в pending, готовые не повторятся).
 3. Не запускайте две сессии брекета одновременно на одном state — файловые локи не расчитаны на это.
 
 ### Что пасти в чат проекта
-Содержимое `airaw/bracket_work/SUMMARY.md` целиком + финальную таблицу из ячейки 6.
-Я сверю с PREDICTIONS, дам вердикты с метками и внесу в TRICKS."""))
+Содержимое `airaw/evo_work/EVO_SUMMARY.md` целиком + финальную таблицу из ячейки 6.
+Я сверю с предсказаниями E1–E5, дам вердикты с метками и внесу в TRICKS."""))
 
 nb = {
     "nbformat": 4, "nbformat_minor": 5,
