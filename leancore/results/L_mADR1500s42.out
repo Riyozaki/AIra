@@ -16,3 +16,5 @@
 {"step": 1200, "train_loss": 4.718, "val_loss": 4.7795, "val_ppl": 119.04, "wall": 588.6, "tok_s": 4700.8, "tokens": 2767104}
 {"step": 1300, "train_loss": 4.8538, "val_loss": 4.765, "val_ppl": 117.33, "wall": 638.3, "tok_s": 4696.3, "tokens": 2997504}
 {"step": 1400, "train_loss": 4.5903, "val_loss": 4.7607, "val_ppl": 116.83, "wall": 1027.9, "tok_s": 3140.4, "tokens": 3227904}
+{"step": 1499, "train_loss": 4.6202, "val_loss": 4.7707, "val_ppl": 118.0, "wall": 1509.9, "tok_s": 2288.9, "tokens": 3456000}
+SUMMARY {"tag": "L_mADR1500s42", "kind": "ema", "params": 2592195, "tokens": 3456000, "wall_s": 1510.0, "tok_s": 2288.8, "final_val_loss": 4.7707, "final_val_ppl": 118.0}
