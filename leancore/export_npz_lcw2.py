@@ -61,7 +61,7 @@ if os.environ.get("HEAD4"):
     add("Et4.qsum", qT.astype(np.int32).sum(1).astype(np.int32), 0)
 elif SHARE8:                              # EtT не нужна: голова читает строки int8-E
     pass
-elif True or "--i8head" in sys.argv:
+elif "--i8head" in sys.argv:
     Wt = d["E"].astype(np.float32).T                      # (D,V)
     sh = np.abs(Wt).max(0).clip(1e-6)                     # per-out absmax
     q8 = np.clip(np.rint(Wt / sh[None, :] * 127), -127, 127).astype(np.int8)

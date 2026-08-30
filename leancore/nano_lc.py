@@ -8,7 +8,7 @@ mixer+FFN с гейтом σ(s_t) (ADR, mixture-of-depths стиль); k дел�
 
 CLI: python3 nano_lc.py --kind ema --tag run --steps 500 [--adr 0.55] [--initckpt x.npz]
 """
-import os, sys, json, math, time, argparse
+import os, sys, json, math, time, argparse, zlib
 import numpy as np
 
 PROF = {}      # in-situ профайлер: NANOLC_PROF=1 → медианы по секциям в конце
@@ -32,7 +32,7 @@ def scatter_add_rows(dst, ids, src):
 class Params:
     def __init__(self): self.d, self.g = {}, {}
     def add(self, name, shape, std=0.02, init=None):
-        rng = np.random.default_rng(abs(hash(name)) % (2**32))
+        rng = np.random.default_rng(zlib.crc32(name.encode()) & 0xFFFFFFFF)  # детерминизм: hash() солится за процесс
         self.d[name] = (rng.normal(0, std, shape).astype(f32) if init is None else init(shape))
         self.g[name] = np.zeros_like(self.d[name])
     def zero(self):
