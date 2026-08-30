@@ -10,3 +10,6 @@
 {"step": 700, "train_loss": 4.6009, "val_loss": 4.8421, "val_ppl": 126.73, "wall": 446.4, "tok_s": 3617.7, "tokens": 1615104}
 {"step": 800, "train_loss": 4.7567, "val_loss": 4.8261, "val_ppl": 124.73, "wall": 507.3, "tok_s": 3637.6, "tokens": 1845504}
 {"step": 900, "train_loss": 4.7513, "val_loss": 4.8156, "val_ppl": 123.42, "wall": 568.3, "tok_s": 3652.6, "tokens": 2075904}
+{"step": 1000, "train_loss": 4.6953, "val_loss": 4.8061, "val_ppl": 122.26, "wall": 697.0, "tok_s": 3308.7, "tokens": 2306304}
+{"step": 1100, "train_loss": 4.562, "val_loss": 4.7858, "val_ppl": 119.8, "wall": 1783.8, "tok_s": 1422.1, "tokens": 2536704}
+{"step": 1200, "train_loss": 4.7494, "val_loss": 4.779, "val_ppl": 118.98, "wall": 1845.2, "tok_s": 1499.6, "tokens": 2767104}
