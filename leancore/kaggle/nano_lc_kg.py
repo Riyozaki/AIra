@@ -10,7 +10,8 @@ CLI: python3 nano_lc.py --kind ema --tag run --steps 500 [--adr 0.55] [--initckp
 """
 import os, sys, json, math, time, argparse, zlib
 import numpy as hnp
-from lcxp import xp, to_dev, asnumpy, on_gpu, save_npz, init_norms, trunk_ratio, scatter_rows
+from lcxp import (xp, to_dev, asnumpy, on_gpu, save_npz, init_norms, trunk_ratio,
+              scatter_rows, is_contig, gpu_info)
 np = xp  # backend (numpy на CPU, cupy на GPU); host-операции — через hnp
 
 PROF = {}      # in-situ профайлер: NANOLC_PROF=1 → медианы по секциям в конце
@@ -199,7 +200,7 @@ def kron_bwd(c, dy2d):
 def softmax_ce(logits, y, destroy=False):      # logits (B,T,V), y (B,T) -> (loss, dlogits); destroy=True → пишем dz поверх logits
     B, T, V = logits.shape
     if _KS is not None and logits.dtype == np.float32:
-        dz = logits if (destroy and logits.flags['C_CONTIGUOUS']) else np.ascontiguousarray(logits, np.float32).copy()
+        dz = logits if (destroy and is_contig(logits)) else np.ascontiguousarray(logits, np.float32).copy()
         yy = np.ascontiguousarray(y, np.int64).reshape(-1)
         nll = _KS.k_sce(_fp(dz), _ct.cast(yy.ctypes.data, _ct.POINTER(_ct.c_int64)),
                         B * T, V, np.float32(1.0 / (B * T)))
@@ -247,8 +248,8 @@ def attention_bwd(c, dY):
 _EMA_CACHE = {}                                   # (T,D,a) → M_forward, L_backward
 
 def _ema_mats(a, T, D, dt):
-    key = (T, D, a.tobytes(), dt)
-    got = _EMA_CACHE.get(key)
+    key = None if on_gpu else (T, D, a.tobytes(), dt)   # GPU: tobytes()=D2H-синк — кэш выключен
+    got = None if on_gpu else _EMA_CACHE.get(key)
     if got is not None: return got
     if len(_EMA_CACHE) > 12: _EMA_CACHE.clear()   # a меняется каждый шаг → не копим
     tt = np.arange(T)
@@ -258,7 +259,7 @@ def _ema_mats(a, T, D, dt):
     Pf = a[None, None, :] ** ad
     M = Pf * mf[:, :, None] * (1.0 - a)[None, None, :]         # h_t = Σ_k a^{t−k}(1−a)x_k, k≤t
     Lb = Pf * (dd <= 0)[:, :, None]                             # lam_t = Σ_s a^{s−t}·dH_s, s≥t
-    _EMA_CACHE[key] = (M, Lb)
+    if key is not None: _EMA_CACHE[key] = (M, Lb)
     return M, Lb
 
 def ema_mix(X, th, sc):                        # h_t = a·h_{t-1} + (1-a)·x_t; y = sc⊙h
@@ -716,12 +717,12 @@ def main():
         teacher = NanoGPT(V)
         td = hnp.load(args.distill)
         for k in teacher.p.d:
-            if k in td.files: teacher.p.d[k][...] = td[k]
+            if k in td.files: teacher.p.d[k][...] = to_dev(hnp.asarray(td[k]).copy())
         print(f"[{args.tag}] учитель {args.distill} загружен", flush=True)
     if args.initckpt:
         d0 = hnp.load(args.initckpt)
         for k in model.p.d:
-            if k in d0.files: model.p.d[k][...] = d0[k]
+            if k in d0.files: model.p.d[k][...] = to_dev(hnp.asarray(d0[k]).copy())
         print(f"[{args.tag}] init from {args.initckpt}", flush=True)
     nparams = sum(v.size for v in model.p.d.values())
     print(f"[{args.tag}] nano-{args.kind} params={nparams:,} backend={'cupy-gpu' if on_gpu else 'numpy'}", flush=True)

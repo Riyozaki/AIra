@@ -78,3 +78,25 @@ def init_norms(d):
 def trunk_ratio(d, n0):
     """‖W_trunk‖ / ‖W_trunk_init‖: авто-дисквалификация «мёртвых» прогонов (<3 к шагу 100)."""
     return init_norms(d) / max(n0, 1e-12)
+
+
+def is_contig(a):
+    """cupy-ndarray имеет .flags только с ключами c_contiguous/f_contiguous/owndata —
+    обращения вида flags['C_CONTIGUOUS'] на GPU дают KeyError (нашли на Kaggle T4)."""
+    if on_gpu:
+        try:
+            return bool(a.flags['c_contiguous'])
+        except Exception:
+            return True                      # всё, что приходит с matmul/elementwise — C-contiguous
+    return bool(a.flags['C_CONTIGUOUS'])
+
+
+def gpu_info():
+    if not on_gpu:
+        return "numpy"
+    try:
+        d = xp.cuda.runtime.getDeviceProperties(xp.cuda.Device().id)
+        nm = d['name']
+        return f"cupy:{nm.decode() if isinstance(nm, bytes) else nm}"
+    except Exception:
+        return "cupy"

@@ -21,7 +21,7 @@ B evo (популяция 8, поколений 3 @200, сиды [1,42]) → C f
 Режимы CLI: init | worker | status | summary. Env EVO_QUICK=1 — трубопроводный
 дым (qual 4 @20, 2 поколения по 4, финал @30).
 """
-import os, sys, json, math, time, glob, shutil, argparse, subprocess
+import os, sys, json, math, time, glob, shutil, signal, argparse, subprocess
 import numpy as hnp
 
 QUICK = os.environ.get("EVO_QUICK", "0") == "1"
@@ -127,6 +127,39 @@ def save(workdir, st):
     os.replace(tmp, wp(workdir, "evo_state.json"))
 
 
+def _lock(workdir, name, wait=120.0):
+    """mkdir-based мьютекс (атомарен на POSIX)."""
+    p = wp(workdir, "jobs", name)
+    t0 = time.time()
+    while True:
+        try:
+            os.mkdir(p)
+            return p
+        except FileExistsError:
+            if time.time() - t0 > wait:
+                raise TimeoutError(f"lock {name}: >{wait:.0f}s")
+            time.sleep(0.05)
+
+
+def _unlock(p):
+    shutil.rmtree(p, ignore_errors=True)
+
+
+def state_update(workdir, mutate):
+    """Атомарный read-modify-write evo_state.json под глобальным локом.
+    Без него два воркера, закончившие джобу одновременно, затирали записи друг друга
+    (load→update→save всем файлом) → повторные прогоны и сожжённые часы [вердикт
+    архитектурного разбора агента-2; у нас такая же конструкция — патч принят]."""
+    p = _lock(workdir, "state.lock")
+    try:
+        st = load(workdir)
+        mutate(st)
+        save(workdir, st)
+        return st
+    finally:
+        _unlock(p)
+
+
 def jkey(stage, gen, name, seed):
     return f"{stage}{gen}_{name}_s{seed}"
 
@@ -188,6 +221,12 @@ def parse_result(job):
     for r in rows:
         if r["step"] >= 100 and "wn" in r and r["wn"] < 3.0:
             return "dq", float(ppl), 0.0, f"мертв: wn={r['wn']}@{r['step']}"
+    nst = int(job.get("steps", 0))
+    if nst >= 20 and last.get("step", nst) < 0.6 * nst:
+        return "dq", float(ppl), 0.0, f"недопрогон: {last.get('step')}/{nst} шагов"
+    p0 = rows[0].get("val_ppl")
+    if p0 and float(ppl) >= 0.9 * float(p0):
+        return "dq", float(ppl), 0.0, f"нет движения: ppl={ppl} @0={p0}"
     slope = ((rows[0]["val_ppl"] - ppl) / max(1, last["step"] - rows[0]["step"])) if len(rows) > 1 else 0.0
     return "done", float(ppl), float(slope), ""
 
@@ -328,6 +367,10 @@ def cmd_worker(args):
         env["LC_BACKEND"] = args.backend
     if args.cuda is not None:
         env["CUDA_VISIBLE_DEVICES"] = str(args.cuda)
+    if args.engine == "torch" or (args.backend or "") == "cupy":
+        env.setdefault("LC_SKIP_KERNELS", "1")     # ctypes-ядра x86-специфичны
+        env.setdefault("OPENBLAS_NUM_THREADS", "1")  # воркеры не дерутся за BLAS-потоки
+        env.setdefault("OMP_NUM_THREADS", "1")
     while True:
         st = load(args.workdir)
         if st["stage"] == "final" and stage_done(gen_jobs(st, "final", 0)):
@@ -337,15 +380,21 @@ def cmd_worker(args):
         if stage_done(cur) and st["stage"] != "final":
             lock = wp(args.workdir, "jobs", "advance.lock")
             try:
-                os.mkdir(lock)
-                st = load(args.workdir)
-                cur = gen_jobs(st, st["stage"], st["gen"])
-                if stage_done(cur):
-                    msg = advance(args.workdir, st)
-                    save(args.workdir, st)
-                    print(f"[w{args.id}] {msg}", flush=True)
-            finally:
-                shutil.rmtree(lock, ignore_errors=True)
+                os.mkdir(lock)            # атомарная заявка
+            except FileExistsError:
+                lock = None               # поколение решает сосед — его лок не трогаем
+            if lock is not None:
+                try:
+                    st = load(args.workdir)
+                    cur = gen_jobs(st, st["stage"], st["gen"])
+                    if stage_done(cur):
+                        box = {}
+                        def _adv(st_):
+                            box["msg"] = advance(args.workdir, st_)
+                        state_update(args.workdir, _adv)
+                        print(f"[w{args.id}] {box['msg']}", flush=True)
+                finally:
+                    _unlock(lock)
         elif stage_done(cur) and st["stage"] == "final":
             return
         claimed = None
@@ -368,26 +417,75 @@ def cmd_worker(args):
             return
         job, lock = claimed
         key = [k for k, v in st["jobs"].items() if v["tag"] == job["tag"]][0]
-        st = load(args.workdir)
-        st["jobs"][key]["status"] = "running"
-        save(args.workdir, st)
+        def _run(st_, key=key):
+            st_["jobs"][key]["status"] = "running"
+        state_update(args.workdir, _run)
         cmd = cfg_cli(args.engine, job["cfg"], job["steps"], job["eval_every"], job["seed"],
                       job["tag"], args.data, saveckpt=(1 if st_stage_is_final(job) else 0))
         print(f"[w{args.id}] СТАРТ {key} (steps={job['steps']} seed={job['seed']} cfg={job['cfg']})", flush=True)
         t0 = time.time()
+        logp = wp(args.workdir, "jobs", f"{key}.log")
+        box = {"ch": None}
+
+        def _bail(signum=None, _frame=None):
+            """SIGTERM/SIGINT: гасим тренера (иначе сирота держит GPU), джоба → pending.
+            Без этого воркер, убитый по таймауту сессии/монитора, оставлял прогон running навсегда."""
+            ch = box["ch"]
+            if ch is not None and ch.poll() is None:
+                try:
+                    ch.terminate()
+                    for _ in range(50):
+                        if ch.poll() is not None:
+                            break
+                        time.sleep(0.1)
+                    if ch.poll() is None:
+                        ch.kill()
+                except Exception:
+                    pass
+            def _rev(st_):
+                if key in st_["jobs"]:
+                    st_["jobs"][key]["status"] = "pending"
+            try:
+                state_update(args.workdir, _rev)
+            finally:
+                _unlock(lock)
+            print(f"[w{args.id}] {'сигнал ' + str(signum) if signum else 'стоп'} → {key} в pending", flush=True)
+            sys.exit(143)
+
+        old_h = [signal.signal(signal.SIGTERM, _bail), signal.signal(signal.SIGINT, _bail)]
         try:
-            proc = subprocess.run(cmd, cwd=HERE, env=env, timeout=args.job_timeout)
-            rc = proc.returncode
-        except subprocess.TimeoutExpired:
-            rc = -9
+            with open(logp, "wb") as lf:
+                ch = subprocess.Popen(cmd, cwd=HERE, env=env, stdout=lf, stderr=subprocess.STDOUT)
+                box["ch"] = ch
+                try:
+                    rc = ch.wait(timeout=args.job_timeout)
+                except subprocess.TimeoutExpired:
+                    _bail()
+                    rc = -9
+        except Exception as e:
+            rc = -8
+            try:
+                open(logp, "ab").write(f"\n[worker] запуск упал: {type(e).__name__}: {e}\n".encode())
+            except Exception:
+                pass
+        finally:
+            signal.signal(signal.SIGTERM, old_h[0]); signal.signal(signal.SIGINT, old_h[1])
+            box["ch"] = None
         status, ppl, slope, dq = parse_result(job)
-        if rc != 0 and status == "done":
-            status, dq = "dq", f"rc={rc}"
-        st = load(args.workdir)
-        st["jobs"][key].update(status=status, val_ppl=ppl, slope=slope, dq=dq,
-                               worker=args.id, elapsed=round(time.time() - t0, 1))
-        save(args.workdir, st)
-        shutil.rmtree(lock, ignore_errors=True)
+        if rc != 0:
+            tail = ""
+            try:
+                tail = "".join(open(logp, errors="replace").readlines()[-4:])
+            except Exception:
+                pass
+            dq = ((dq + " | ") if dq else "") + f"rc={rc}" + (f" | {tail.strip()[:250]}" if tail else "")
+            status = "dq"
+        el = round(time.time() - t0, 1)
+        def _fin(st_, key=key, status=status, ppl=ppl, slope=slope, dq=dq, wid=args.id, el=el):
+            st_["jobs"][key].update(status=status, val_ppl=ppl, slope=slope, dq=dq,
+                                    worker=wid, elapsed=el)
+        state_update(args.workdir, _fin)
+        _unlock(lock)
         print(f"[w{args.id}] ФИН {key}: {status} ppl={ppl} {dq}", flush=True)
 
 

@@ -97,15 +97,48 @@ else:
         urllib.request.urlretrieve(RAW + f, os.path.join(dst, f))
     print("данные скачаны с GitHub raw")
 
-# lc_kernels.so (ускоритель numpy-пути) — лучшая попытка, без падения
-try:
+# lc_kernels: НЕ чужой бинарь (-march=native на другом CPU = риск SIGILL).
+# Собираем из lc_kernels.c на этой машине и проверяем self-test'ом; иначе numpy-фолбэк.
+import subprocess as _sp, sys as _sys
+KSTAT = "off"
+def _dl(f):
     urllib.request.urlretrieve(
-        "https://raw.githubusercontent.com/Riyozaki/AIra/arena/01a04a42-aira/leancore/lc_kernels.so",
-        os.path.join(BASE, "lc_kernels.so"))
-    print("lc_kernels.so подтянут")
+        "https://raw.githubusercontent.com/Riyozaki/AIra/arena/01a04a42-aira/leancore/" + f,
+        os.path.join(BASE, f))
+try:
+    _dl("lc_kernels.c")
+    rc = _sp.run(["gcc", "-O3", "-march=native", "-shared", "-fPIC",
+                  "lc_kernels.c", "-o", "lc_kernels.so", "-lm"],
+                 cwd=BASE, capture_output=True, text=True)
+    if rc.returncode != 0:
+        raise RuntimeError((rc.stderr or "")[:300])
+    KSTAT = "built"
+    print("ядра собраны из lc_kernels.c")
 except Exception as e:
-    print("lc_kernels.so не удалось (ок: numpy-фолбэк):", type(e).__name__)
-
+    print("сборка не удалась ({}), пробую готовый .so:".format(type(e).__name__))
+    try:
+        _dl("lc_kernels.so"); KSTAT = "downloaded"
+    except Exception as e2:
+        print("lc_kernels.so недоступен — чистый numpy:", type(e2).__name__)
+if KSTAT in ("built", "downloaded"):
+    KPROBE = ("import ctypes,sys,numpy as np;"
+              "L=ctypes.CDLL(sys.argv[1]);F=ctypes.POINTER(ctypes.c_float);"
+              "x=np.random.RandomState(0).randn(4608).astype(np.float32);y=np.empty_like(x);t=np.empty_like(x);"
+              "L.k_gelu_fwd.argtypes=[F,F,F,ctypes.c_int64];"
+              "L.k_gelu_fwd(x.ctypes.data_as(F),y.ctypes.data_as(F),t.ctypes.data_as(F),x.size);"
+              "g=np.tanh(0.7978845608028654*(x+0.044715*x**3));"
+              "err=float(np.abs(y-0.5*x*(1.0+g)).max());"
+              "print('gelu err', err);raise SystemExit(0 if err < 1e-4 else 2)")
+    open(os.path.join(BASE, "_kprobe.py"), "w").write(KPROBE)
+    probe = _sp.run([_sys.executable, "_kprobe.py", os.path.join(BASE, "lc_kernels.so")],
+                    cwd=BASE, capture_output=True, text=True, timeout=180)
+    if probe.returncode == 0:
+        print("ядра self-test:", probe.stdout.strip())
+    else:
+        print("ядра НЕ прошли self-test (чужая ISA?) → LC_SKIP_KERNELS=1:",
+              ((probe.stderr or probe.stdout).strip()[-200:]))
+        KSTAT = "skipped"
+os.environ["LC_SKIP_KERNELS"] = "1" if KSTAT == "skipped" else "0"
 import numpy as np, json as _j
 tr = np.load(os.path.join(dst, "train.npy"))
 print("train tokens:", len(tr), "| vocab:", _j.load(open(os.path.join(dst, 'meta.json')))['vocab'])
@@ -118,14 +151,20 @@ cells.append(md("""## 3 · GPU-гейт честности и выбор дви�
 Критерий: |Δval_ppl| ≤ 2% → engine=torch (весь брекет на torch-GPU), иначе engine=numpy и
 брекет едет на CPU-воркерах — но ни один бит плохих данных не попадёт в таблицу."""))
 
-cells.append(code("""def run_once(engine, steps=40, seed=1):
+cells.append(code("""STRICT_GPU = True   # GPU-квота оплачена: работать на CPU = инцидент, а не фолбэк
+
+def run_once(engine, steps=40, seed=1):
     import subprocess, json
-    env = dict(os.environ); env["LC_BACKEND"] = "numpy"
+    env = dict(os.environ)
     if engine == "torch":
+        env["LC_SKIP_KERNELS"] = "1"
         cmd = [sys.executable, os.path.join(BASE, "train_torch.py"), "--steps", str(steps),
                "--eval_every", "20", "--ssk", "512", "--ssfull", "0.12", "--seed", str(seed),
                "--negrng", "1", "--trunknorm", "1", "--tag", f"gate_{engine}", "--data", PREP]
     else:
+        env["LC_BACKEND"] = engine          # numpy | cupy
+        if engine == "cupy":
+            env["LC_SKIP_KERNELS"] = "1"
         cmd = [sys.executable, os.path.join(BASE, "nano_lc_kg.py"), "--kind", "ema", "--opt", "muon",
                "--steps", str(steps), "--eval_every", "20", "--ssk", "512", "--ssfull", "0.12",
                "--seed", str(seed), "--negrng", "1", "--trunknorm", "1", "--tag", f"gate_{engine}",
@@ -134,22 +173,22 @@ cells.append(code("""def run_once(engine, steps=40, seed=1):
         r = subprocess.run(cmd, cwd=BASE, env=env, capture_output=True, text=True, timeout=3600)
     except Exception as e:
         print(f"[gate:{engine}] запуск не удался: {type(e).__name__}: {e}")
-        return None, []
+        return None, 0.0, []
     if r.returncode != 0:
         print(f"[gate:{engine}] КРАШ rc={r.returncode} -- хвост stderr:")
         print((r.stderr or "")[-2500:]); print("--- stdout ---"); print((r.stdout or "")[-1200:])
-        return None, []
+        return None, 0.0, []
     p = os.path.join(BASE, "results", f"run_gate_{engine}.jsonl")
     if not os.path.exists(p):
         print(f"[gate:{engine}] НЕТ {p}! rc=0, но результат не записан. stderr:")
-        print((r.stderr or "")[-2500:]); print("--- stdout ---"); print((r.stdout or "")[-1200:])
-        return None, []
+        print((r.stderr or "")[-2500:])
+        return None, 0.0, []
     rows = [json.loads(l) for l in open(p) if l.strip().startswith("{")]
     if not rows:
-        print(f"[gate:{engine}] jsonl пуст"); return None, []
-    return rows[-1]["val_ppl"], rows
+        print(f"[gate:{engine}] jsonl пуст"); return None, 0.0, []
+    return rows[-1]["val_ppl"], float(rows[-1].get("tok_s") or 0.0), rows
 
-NGPU, TORCH_OK = 0, False
+NGPU, TORCH_OK, CUPY_OK = 0, False, False
 try:
     import torch
     TORCH_OK = True
@@ -158,43 +197,52 @@ try:
           [torch.cuda.get_device_name(i) for i in range(NGPU)] if NGPU else "")
 except Exception as e:
     print("torch недоступен:", type(e).__name__)
+try:
+    import cupy as _cp
+    _t = _cp.asarray([1.0], dtype=_cp.float32); _ = float(_t.sum())
+    CUPY_OK = NGPU > 0 or True
+    print("cupy", _cp.__version__, "— numpy-движок доступен на GPU (полная семантика модели)")
+except Exception as e:
+    print("cupy недоступен:", type(e).__name__)
 
 ENGINE = "numpy"
-WHY = f"cuda не видна из torch (NGPU={NGPU}) — если Accelerator включён, перезапусти ядро"
-if NGPU > 0:
-    ppl_t, rows_t = run_once("torch", steps=40, seed=1)
-    if ppl_t is None:
-        WHY = "torch-движок упал (лог выше) — пришли мне этот вывод"
-    else:
-        ppl_n, rows_n = run_once("numpy", steps=40, seed=1)
-        assert ppl_n is not None, "numpy-референс не отработал (лог выше) — стоп"
-        d = abs(ppl_t - ppl_n) / ppl_n
-        print(f"GATE: torch={ppl_t:.2f} numpy={ppl_n:.2f} relDelta={d:.3%}")
-        print(" ряды torch:", [(r["step"], r["val_ppl"]) for r in rows_t])
-        print(" ряды numpy:", [(r["step"], r["val_ppl"]) for r in rows_n])
-        if d <= 0.02:
-            ENGINE = "torch"; WHY = f"гейт пройден (relDelta={d:.2%})"
-        else:
-            WHY = f"расхождение {d:.2%} > 2% — пришли мне вывод, решу вопрос"
-_force = os.environ.get("LC_FORCE_ENGINE", "").strip().lower()
-if _force in ("torch", "numpy") and _force != ENGINE:
-    if _force == "torch" and NGPU == 0:
-        print("LC_FORCE_ENGINE=torch, но cuda нет — игнорирую форс")
-    else:
-        print(f"ФОРС: ENGINE {ENGINE} -> {_force} (по LC_FORCE_ENGINE)")
-        ENGINE = _force; WHY += " [форс]"
-NWORKERS = NGPU if ENGINE == "torch" else max(1, min(3, (os.cpu_count() or 2) - 1))
+REF, REFSPD, rows_ref = run_once("numpy", steps=40, seed=1)
+assert REF is not None, "numpy-референс не отработал (лог выше) — стоп"
+print(f"референс numpy/CPU: ppl={REF:.2f} tok/s={REFSPD:.0f}")
+GATE_TAB = []
+for cand in ([m for m, ok in (("torch", TORCH_OK and NGPU > 0), ("cupy", CUPY_OK)) if ok]):
+    ppl, spd, rows = run_once(cand, steps=40, seed=1)
+    if ppl is None:
+        GATE_TAB.append((cand, None, None, 0.0, "упал")); continue
+    d = abs(ppl - REF) / REF
+    GATE_TAB.append((cand, ppl, d, spd, "ok" if d <= 0.02 else f"расхождение {d:.2%}>2%"))
+print("\\n{:<7} {:>9} {:>9} {:>8}  вердикт".format("движок", "val_ppl", "относ.Δ", "tok/s"))
+for m, ppl, d, spd, note in GATE_TAB:
+    print("{:<7} {:>9} {:>9} {:>8}  {}".format(
+        m, "—" if ppl is None else f"{ppl:.2f}", "—" if d is None else f"{d:.3%}", f"{spd:.0f}", note))
+ok = [(m, ppl, d, spd) for m, ppl, d, spd, note in GATE_TAB if ppl is not None and d <= 0.02]
+WHY = "cuda не видна (NGPU=0)"
+if ok:
+    ok.sort(key=lambda t: -t[3])
+    ENGINE = ok[0][0]
+    WHY = f"гейт пройден: {ENGINE} Δ={ok[0][2]:.2%}, ×{ok[0][3]/max(REFSPD,1):.2f} к CPU"
+elif NGPU > 0 or CUPY_OK:
+    WHY = "ни один GPU-движок не прошёл гейт — логи выше"
+    if STRICT_GPU:
+        raise RuntimeError("GPU-движки не прошли гейт корректности (см. таблицу). "
+                           "GPU-квота оплачена: жечь её на CPU нельзя. Пришли этот вывод в проект; "
+                           "сознательный CPU-прогон: STRICT_GPU=False в этой ячейке.")
+NWORKERS = NGPU if ENGINE in ("torch", "cupy") else max(1, min(3, (os.cpu_count() or 2) - 1))
 print("=" * 64)
 print("ENGINE:", ENGINE, "| WORKERS:", NWORKERS, "|", WHY)
-if ENGINE == "numpy" and NGPU > 0:
+if ENGINE == "numpy" and (NGPU > 0 or CUPY_OK):
     print("!" * 64)
-    print("! GPU НЕ БУДЕТ ГРУЗИТЬСЯ, но GPU-КВОТА ГОРИТ, пока Accelerator=GPU.")
-    print("! Варианты: (а) пришли мне вывод выше — чиню; или (б) Settings →")
-    print("! Accelerator → None и Run All: брекет честно поедет на CPU без")
-    print("! траты GPU-квоты (медленнее, но CPU-квоты хватит).")
+    print("! GPU НЕ БУДЕТ ГРУЗИТЬСЯ, но GPU-КВОТА ГОРИТ. Вариант: Accelerator → None и Run All.")
     print("!" * 64)
-print("=" * 64)
-"""))
+json.dump(dict(engine=ENGINE, workers=NWORKERS, ref_ppl=REF, ref_tok_s=REFSPD,
+               gate=[[m, ppl, d, s, n] for m, ppl, d, s, n in GATE_TAB], why=WHY),
+          open(os.path.join(BASE, "engine.json"), "w"), ensure_ascii=False, indent=1)
+print("=" * 64)"""))
 
 cells.append(md("## 4 · Предсказания (зафиксированы ДО запуска — в PREDICTIONS.md)"))
 
@@ -215,10 +263,14 @@ subprocess.run([sys.executable, os.path.join(BASE, "evo.py"), "init",
 procs = []
 for wid in range(NWORKERS):
     env = dict(os.environ)
-    env["LC_BACKEND"] = "numpy"
     if ENGINE == "torch":
         cmd = [sys.executable, os.path.join(BASE, "evo.py"), "worker", "--id", str(wid),
-               "--engine", "torch", "--cuda", str(wid), "--workdir", WORK, "--data", PREP]
+               "--engine", "torch", "--cuda", str(wid % max(1, NGPU)), "--workdir", WORK, "--data", PREP]
+    elif ENGINE == "cupy":
+        env["LC_BACKEND"] = "cupy"
+        cmd = [sys.executable, os.path.join(BASE, "evo.py"), "worker", "--id", str(wid),
+               "--engine", "numpy", "--backend", "cupy", "--cuda", str(wid % max(1, NGPU)),
+               "--workdir", WORK, "--data", PREP]
     else:
         env["OPENBLAS_NUM_THREADS"] = str(max(1, (os.cpu_count() or 2) // max(1, NWORKERS)))
         cmd = [sys.executable, os.path.join(BASE, "evo.py"), "worker", "--id", str(wid),
@@ -266,7 +318,7 @@ nb = {
     "metadata": {
         "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
         "language_info": {"name": "python", "version": "3.10"},
-        "kaggle": {"accelerator": "gpu", "dataSources": [], "dockerImageVersionId": 12,
+        "kaggle": {"accelerator": "nvidiaTeslaT4", "dataSources": [], "isGpuEnabled": True,
                    "isInternetEnabled": True, "language": "python", "sourceType": "notebook"},
     },
     "cells": cells,

@@ -17,7 +17,7 @@ PATCHES = [
     # 1. импорт numpy → шим
     (
         "import numpy as np",
-        "import numpy as hnp\nfrom lcxp import xp, to_dev, asnumpy, on_gpu, save_npz, init_norms, trunk_ratio, scatter_rows\nnp = xp  # backend (numpy на CPU, cupy на GPU); host-операции — через hnp",
+        "import numpy as hnp\nfrom lcxp import (xp, to_dev, asnumpy, on_gpu, save_npz, init_norms, trunk_ratio,\n              scatter_rows, is_contig, gpu_info)\nnp = xp  # backend (numpy на CPU, cupy на GPU); host-операции — через hnp",
     ),
     # 2. ctypes-ядра — только CPU
     (
@@ -134,6 +134,37 @@ PATCHES = [
         '''    ap.add_argument("--ssalpha", type=float, default=1.0, help="степень сглаживания unigram-предложения (word2vec 0.75)")
     ap.add_argument("--negrng", type=int, default=0, help="1 = отдельный rng-поток для негативов (парность порядка данных между конфигами)")
     ap.add_argument("--trunknorm", type=int, default=0, help="1 = лог ‖W_trunk‖/‖W₀‖ в jsonl (авто-DQ мёртвых прогонов)")''',
+    ),
+    # 16. исправления ниже — по разбору агента-2 (Kaggle GPU-правки), см. TRICKS «KAGGLE-2»;
+    #     все ветки only-on_gpu → бит-паритет CPU сохранён
+    # 16a. flags['C_CONTIGUOUS'] → backend-толерантный is_contig (у cupy другие ключи flags)
+    (
+        "        dz = logits if (destroy and logits.flags['C_CONTIGUOUS']) else np.ascontiguousarray(logits, np.float32).copy()",
+        "        dz = logits if (destroy and is_contig(logits)) else np.ascontiguousarray(logits, np.float32).copy()",
+    ),
+    # 13b. EMA-кэш: на GPU tobytes() — device→host синк на каждый вызов; пересчёт <1 мс
+    (
+        """def _ema_mats(a, T, D, dt):
+    key = (T, D, a.tobytes(), dt)
+    got = _EMA_CACHE.get(key)
+    if got is not None: return got""",
+        """def _ema_mats(a, T, D, dt):
+    key = None if on_gpu else (T, D, a.tobytes(), dt)   # GPU: tobytes()=D2H-синк — кэш выключен
+    got = None if on_gpu else _EMA_CACHE.get(key)
+    if got is not None: return got""",
+    ),
+    (
+        "    _EMA_CACHE[key] = (M, Lb)\n    return M, Lb",
+        "    if key is not None: _EMA_CACHE[key] = (M, Lb)\n    return M, Lb",
+    ),
+    # 13c/13d. initckpt/distill: host-массив нельзя писать в device-слот напрямую
+    (
+        "            if k in td.files: teacher.p.d[k][...] = td[k]",
+        "            if k in td.files: teacher.p.d[k][...] = to_dev(hnp.asarray(td[k]).copy())",
+    ),
+    (
+        "            if k in d0.files: model.p.d[k][...] = d0[k]",
+        "            if k in d0.files: model.p.d[k][...] = to_dev(hnp.asarray(d0[k]).copy())",
     ),
 ]
 
