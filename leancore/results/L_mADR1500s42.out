@@ -5,3 +5,7 @@
 {"step": 100, "train_loss": 5.8771, "val_loss": 5.7433, "val_ppl": 312.08, "wall": 49.7, "tok_s": 4684.7, "tokens": 232704}
 {"step": 200, "train_loss": 5.4602, "val_loss": 5.2461, "val_ppl": 189.83, "wall": 95.6, "tok_s": 4846.2, "tokens": 463104}
 {"step": 300, "train_loss": 5.1211, "val_loss": 5.093, "val_ppl": 162.88, "wall": 143.6, "tok_s": 4829.7, "tokens": 693504}
+{"step": 400, "train_loss": 4.9602, "val_loss": 4.9966, "val_ppl": 147.9, "wall": 194.1, "tok_s": 4760.2, "tokens": 923904}
+{"step": 500, "train_loss": 4.9217, "val_loss": 4.9482, "val_ppl": 140.92, "wall": 244.3, "tok_s": 4725.2, "tokens": 1154304}
+{"step": 600, "train_loss": 4.8725, "val_loss": 4.8961, "val_ppl": 133.77, "wall": 293.7, "tok_s": 4715.0, "tokens": 1384704}
+{"step": 700, "train_loss": 4.911, "val_loss": 4.8692, "val_ppl": 130.22, "wall": 345.0, "tok_s": 4680.9, "tokens": 1615104}
