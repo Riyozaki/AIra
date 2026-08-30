@@ -490,7 +490,7 @@ def cmd_worker(args):
 
 
 def st_stage_is_final(job):
-    return job["stage"] == "final"
+    return job["stage"].startswith("final")   # этап называется "final0", не "final"
 
 
 def cmd_status(args):
@@ -510,7 +510,7 @@ def cmd_status(args):
 def cmd_summary(args):
     st = load(args.workdir)
     L = ["# EVO-ТУРНИР LeanCore — итоги", "",
-         f"поколений сыграно: {st['gen'] if st['stage'] == 'evo' else st['gen']}, финальный σ={st['sigma']}",
+         f"поколений сыграно: {sum(1 for h in st['history'] if h['stage'] == 'evo')}, финальный σ={st['sigma']}",
          f"HOF: {json.dumps(st['hof'], ensure_ascii=False)}", ""]
     for h in st["history"]:
         if h["stage"] == "qual":
