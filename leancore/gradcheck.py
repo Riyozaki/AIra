@@ -97,6 +97,39 @@ for idx in np.random.default_rng(4).choice(lg.size, 80, replace=False):
 results.append(("softmax_ce", worst, "", worst < rel_tol))
 
 
+# sampled_ce: разреженная голова (аналитика vs FD по H и по строкам E[cand])
+from nano_lc import sampled_ce, sampled_ce_bwd
+rng = np.random.default_rng(7)
+Vg, Dg, Bg, Tg, Kg = 40, 8, 2, 6, 12
+Hs = rng.normal(0, 0.6, (Bg, Tg, Dg)).astype(np.float64)
+Es = rng.normal(0, 0.5, (Vg, Dg)).astype(np.float64)
+yy = rng.integers(0, Vg, (Bg, Tg))
+cand = np.union1d(np.unique(yy), rng.choice(Vg, Kg, replace=False)).astype(np.int64)
+logcor = rng.normal(0, 0.3, cand.size); logcor[np.isin(cand, yy)] = 0.0
+loss, c = sampled_ce(Hs, yy, Es, cand, logcor)
+dH_ana, dEc_ana = sampled_ce_bwd(c, Hs)
+worst = 0.0; eps = 1e-6
+for arr, ana in ((Hs, dH_ana),):
+    fa = ana.reshape(-1)
+    for idx in np.random.default_rng(8).choice(arr.size, 60, replace=False):
+        flat = arr.reshape(-1); o = flat[idx]
+        flat[idx] = o + eps; lp = sampled_ce(Hs, yy, Es, cand, logcor)[0]
+        flat[idx] = o - eps; lm = sampled_ce(Hs, yy, Es, cand, logcor)[0]
+        flat[idx] = o
+        num = (lp - lm) / (2*eps)
+        if abs(num) + abs(fa[idx]) < 1e-5: continue
+        worst = max(worst, abs(num - fa[idx]) / max(abs(num), abs(fa[idx])))
+for j in range(cand.size):                      # FD по каждой строке Ec (переходим в E)
+    for idx in np.random.default_rng(9).choice(Dg, 4, replace=False):
+        o = Es[cand[j], idx]
+        Es[cand[j], idx] = o + eps; lp = sampled_ce(Hs, yy, Es, cand, logcor)[0]
+        Es[cand[j], idx] = o - eps; lm = sampled_ce(Hs, yy, Es, cand, logcor)[0]
+        Es[cand[j], idx] = o
+        num = (lp - lm) / (2*eps); ana = dEc_ana[j, idx]
+        if abs(num) + abs(ana) < 1e-5: continue
+        worst = max(worst, abs(num - ana) / max(abs(num), abs(ana)))
+results.append(("sampled_ce", worst, "", worst < rel_tol))
+
 def model_fd(tag, make):
     m = make()
     for k in m.p.d: m.p.d[k] = m.p.d[k].astype(np.float64)
@@ -138,6 +171,45 @@ w, wh = model_fd("delta", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="
 results.append(("kda-delta", w, wh, w < 5e-4))
 w, wh = model_fd("ema+moe4", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="ema", moe_e=4))
 results.append(("ema+moe4", w, wh, w < 5e-4))
+w, wh = model_fd("ema+erank", lambda: NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="ema", erank=8))
+results.append(("ema+erank", w, wh, w < 5e-4))
+
+# sampled-head × erank: сквозная FD (новый путь backward с head_cache + lowrank)
+def model_fd_ss_erank():
+    m = NanoGPT(40, D=16, L=3, h=2, ff=32, T=8, kind="ema", erank=8)
+    for k in m.p.d: m.p.d[k] = m.p.d[k].astype(np.float64)
+    for k in m.p.g: m.p.g[k] = m.p.g[k].astype(np.float64)
+    rng = np.random.default_rng(0)
+    ids = rng.integers(0, m.V, (3, 8)); ytrue = rng.integers(0, m.V, (3, 8))
+    cand = np.union1d(np.unique(ytrue), rng.choice(m.V, 10, replace=False)).astype(np.int64)
+    logcor = np.zeros(cand.size)
+    def fn():
+        H, _ = m.forward(ids)
+        Ec0 = m.p.d["U"][cand] @ m.p.d["P"]
+        l, _ = sampled_ce(H, ytrue, Ec0, cand, logcor, Ec=Ec0)
+        return float(l)
+    H, c = m.forward(ids)
+    Ec0 = m.p.d["U"][cand] @ m.p.d["P"]
+    l, (dz, cand_, Ec_) = sampled_ce(H, ytrue, Ec0, cand, logcor, Ec=Ec0)
+    m.p.zero(); m.backward(H, c, head_cache=(cand_, dz, Ec_))
+    worst, where = 0.0, ""
+    eps = 1e-6
+    for name in m.p.d:
+        arr = m.p.d[name]; ga = m.p.g[name]
+        idxs = rng.choice(arr.size, min(40, arr.size), replace=False)
+        for idx in idxs:
+            flat = arr.reshape(-1); o = flat[idx]
+            flat[idx] = o + eps; lp = fn()
+            flat[idx] = o - eps; lm = fn()
+            flat[idx] = o
+            num = (lp - lm) / (2*eps); ana = ga.reshape(-1)[idx]
+            if abs(num) + abs(ana) < 1e-5: continue
+            err = abs(num - ana) / max(abs(num), abs(ana))
+            if err > worst: worst, where = err, f"ss-erank:{name}@{idx}"
+    return worst, where
+
+w, wh = model_fd_ss_erank()
+results.append(("ss+erank", w, wh, w < 5e-4))
 
 ok_all = True
 for name, worst, where, ok in results:

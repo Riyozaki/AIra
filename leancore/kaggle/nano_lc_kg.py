@@ -9,7 +9,10 @@ mixer+FFN с гейтом σ(s_t) (ADR, mixture-of-depths стиль); k дел�
 CLI: python3 nano_lc.py --kind ema --tag run --steps 500 [--adr 0.55] [--initckpt x.npz]
 """
 import os, sys, json, math, time, argparse, zlib
-import numpy as np
+import numpy as hnp
+from lcxp import (xp, to_dev, asnumpy, on_gpu, save_npz, init_norms, trunk_ratio,
+              scatter_rows, is_contig, gpu_info)
+np = xp  # backend (numpy на CPU, cupy на GPU); host-операции — через hnp
 
 PROF = {}      # in-situ профайлер: NANOLC_PROF=1 → медианы по секциям в конце
 def _tick(sec, t0):
@@ -20,20 +23,14 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 f32 = np.float32
 
 def scatter_add_rows(dst, ids, src):
-    """dst[ids] += src с ДУБЛИКАТАМИ в ids (векторно: сорт + reduceat; замена медленному np.add.at).
-    ids (N,) int, src (N,D) — суммируется по одинаковым id и пишется одной fancy-записью."""
-    ids = ids.reshape(-1)
-    src2 = src.reshape(ids.shape[0], -1)
-    order = np.argsort(ids, kind="stable")
-    sids = ids[order]
-    bounds = np.flatnonzero(np.r_[True, sids[1:] != sids[:-1]])
-    dst[sids[bounds]] += np.add.reduceat(src2[order], bounds)
+    """Бэкенд-делегат (numpy: сорт+reduceat как в оригинале; cupy: атомарный scatter_add)."""
+    scatter_rows(dst, ids.reshape(-1), src)
 
 class Params:
     def __init__(self): self.d, self.g = {}, {}
     def add(self, name, shape, std=0.02, init=None):
-        rng = np.random.default_rng(zlib.crc32(name.encode()) & 0xFFFFFFFF)  # детерминизм: hash() солится за процесс
-        self.d[name] = (rng.normal(0, std, shape).astype(f32) if init is None else init(shape))
+        rng = hnp.random.default_rng(zlib.crc32(name.encode()) & 0xFFFFFFFF)  # детерминизм: hash() солится за процесс
+        self.d[name] = to_dev(rng.normal(0, std, shape).astype(f32) if init is None else init(shape))
         self.g[name] = np.zeros_like(self.d[name])
     def zero(self):
         for k in self.g: self.g[k][...] = 0
@@ -44,6 +41,7 @@ class Params:
 import ctypes as _ct
 _KS = None
 try:
+    if on_gpu: raise OSError('gpu backend: ctypes-ядра выключены')
     _KS = _ct.CDLL(os.path.join(ROOT, "lc_kernels.so"))
     _F = _ct.POINTER(_ct.c_float); _I = _ct.POINTER(_ct.c_int64)
     _KS.k_gelu_fwd.argtypes = [_F, _F, _F, _ct.c_int64]
@@ -202,7 +200,7 @@ def kron_bwd(c, dy2d):
 def softmax_ce(logits, y, destroy=False):      # logits (B,T,V), y (B,T) -> (loss, dlogits); destroy=True → пишем dz поверх logits
     B, T, V = logits.shape
     if _KS is not None and logits.dtype == np.float32:
-        dz = logits if (destroy and logits.flags['C_CONTIGUOUS']) else np.ascontiguousarray(logits, np.float32).copy()
+        dz = logits if (destroy and is_contig(logits)) else np.ascontiguousarray(logits, np.float32).copy()
         yy = np.ascontiguousarray(y, np.int64).reshape(-1)
         nll = _KS.k_sce(_fp(dz), _ct.cast(yy.ctypes.data, _ct.POINTER(_ct.c_int64)),
                         B * T, V, np.float32(1.0 / (B * T)))
@@ -250,8 +248,8 @@ def attention_bwd(c, dY):
 _EMA_CACHE = {}                                   # (T,D,a) → M_forward, L_backward
 
 def _ema_mats(a, T, D, dt):
-    key = (T, D, a.tobytes(), dt)
-    got = _EMA_CACHE.get(key)
+    key = None if on_gpu else (T, D, a.tobytes(), dt)   # GPU: tobytes()=D2H-синк — кэш выключен
+    got = None if on_gpu else _EMA_CACHE.get(key)
     if got is not None: return got
     if len(_EMA_CACHE) > 12: _EMA_CACHE.clear()   # a меняется каждый шаг → не копим
     tt = np.arange(T)
@@ -261,7 +259,7 @@ def _ema_mats(a, T, D, dt):
     Pf = a[None, None, :] ** ad
     M = Pf * mf[:, :, None] * (1.0 - a)[None, None, :]         # h_t = Σ_k a^{t−k}(1−a)x_k, k≤t
     Lb = Pf * (dd <= 0)[:, :, None]                             # lam_t = Σ_s a^{s−t}·dH_s, s≥t
-    _EMA_CACHE[key] = (M, Lb)
+    if key is not None: _EMA_CACHE[key] = (M, Lb)
     return M, Lb
 
 def ema_mix(X, th, sc):                        # h_t = a·h_{t-1} + (1-a)·x_t; y = sc⊙h
@@ -339,7 +337,7 @@ class NanoGPT:
                     n1, n2, m1, m2 = kron_pair_facs(D, ff)
                     o1, o2, q1, q2 = kron_pair_facs(ff, D)
                     def kinit(shape):
-                        return np.random.default_rng(1).normal(0, (2.0 / (shape[0]*shape[1]))**0.25, shape).astype(f32)
+                        return hnp.random.default_rng(1).normal(0, (2.0 / (shape[0]*shape[1]))**0.25, shape).astype(f32)
                     for k_ in range(self.kronfc):
                         p.add(f"b{i}.fc1A{k_}", (m1, n1)); p.add(f"b{i}.fc1B{k_}", (m2, n2))
                         p.add(f"b{i}.fc2A{k_}", (q1, o1)); p.add(f"b{i}.fc2B{k_}", (q2, o2))
@@ -707,26 +705,28 @@ def moe_ffn_bwd(c, dOut):
 
 def main():
     args = ap_parse()
-    tr = np.load(f"{ROOT}/{args.data}/train.npy").astype(np.int64)
-    va = np.load(f"{ROOT}/{args.data}/val.npy").astype(np.int64)
+    tr = hnp.load(f"{ROOT}/{args.data}/train.npy").astype(hnp.int64)
+    va = hnp.load(f"{ROOT}/{args.data}/val.npy").astype(hnp.int64)
     V = json.load(open(f"{ROOT}/{args.data}/meta.json"))["vocab"]
-    rng = np.random.default_rng(args.seed)
+    rng = hnp.random.default_rng(args.seed)
+    rng_neg = hnp.random.default_rng(args.seed * 1000003 + 17) if getattr(args, 'negrng', 0) else rng
     assert not (args.erank > 0 and args.mtp > 0), "erank+mtp пока не комбинируются"
     model = NanoGPT(V, D=args.dim, L=args.layers, ff=args.ff, kind=args.kind, adr_kf=args.adr, moe_e=args.moe, mtp_w=args.mtp, erank=args.erank, kronfc=args.kronfc)
     teacher = None
     if args.distill:
         teacher = NanoGPT(V)
-        td = np.load(args.distill)
+        td = hnp.load(args.distill)
         for k in teacher.p.d:
-            if k in td.files: teacher.p.d[k][...] = td[k]
+            if k in td.files: teacher.p.d[k][...] = to_dev(hnp.asarray(td[k]).copy())
         print(f"[{args.tag}] учитель {args.distill} загружен", flush=True)
     if args.initckpt:
-        d0 = np.load(args.initckpt)
+        d0 = hnp.load(args.initckpt)
         for k in model.p.d:
-            if k in d0.files: model.p.d[k][...] = d0[k]
+            if k in d0.files: model.p.d[k][...] = to_dev(hnp.asarray(d0[k]).copy())
         print(f"[{args.tag}] init from {args.initckpt}", flush=True)
     nparams = sum(v.size for v in model.p.d.values())
-    print(f"[{args.tag}] nano-{args.kind} params={nparams:,}", flush=True)
+    print(f"[{args.tag}] nano-{args.kind} params={nparams:,} backend={'cupy-gpu' if on_gpu else 'numpy'}", flush=True)
+    N0_TRUNK = init_norms(model.p.d) if getattr(args, "trunknorm", 0) else None
     if args.opt == "muon": opt = MuonW(model.p, lr=args.lr, mulr=args.mulr)
     else: opt = AdamW(model.p, lr=args.lr, wdmask=bool(args.wdmask))
 
@@ -741,7 +741,7 @@ def main():
     if args.ssk > 0:
         assert teacher is None, "ssk: distill пока не комбинируется"
         assert args.mtp == 0, "ssk: mtp пока не комбинируется"
-        cnt = np.bincount(tr, minlength=V).astype(np.float64) + 1.0
+        cnt = hnp.bincount(tr, minlength=V).astype(hnp.float64) + 1.0
         ssq = cnt ** args.ssalpha
         ssq = ssq / ssq.sum()
         print(f"[{args.tag}] sampled softmax: K={args.ssk} негативов/шаг, unigram-предложение, "
@@ -749,11 +749,11 @@ def main():
 
     def batch(ids, rr):
         st = rr.integers(0, len(ids) - args.ctx - 1, size=args.batch)
-        x = np.stack([ids[s:s + args.ctx] for s in st]); y = np.stack([ids[s + 1:s + args.ctx + 1] for s in st])
-        return x, y
+        x = hnp.stack([ids[s:s + args.ctx] for s in st]); y = hnp.stack([ids[s + 1:s + args.ctx + 1] for s in st])
+        return to_dev(x), to_dev(y)
 
     def vloss(iters=6):
-        rr = np.random.default_rng(1234); tot = 0.0
+        rr = hnp.random.default_rng(1234); tot = 0.0
         for _ in range(iters):
             x, y = batch(va, rr)
             H, _ = model.forward(x)
@@ -775,12 +775,14 @@ def main():
         head_cache = None
         use_ss = ssq is not None and step < args.steps * (1.0 - args.ssfull)
         if use_ss:
-            neg = rng.choice(V, size=args.ssk, replace=True, p=ssq)
-            cand = np.union1d(np.unique(y), neg).astype(np.int64)
-            logQ = np.log1p(-np.power(1.0 - ssq[cand], args.ssk))      # log(1−(1−q)^K)
-            logQ[np.isin(cand, y)] = 0.0                               # цели всегда в наборе
-            Ec0 = (model.p.d["U"][cand] @ model.p.d["P"]) if model.erank > 0 else None
-            loss, (dz, cand, Ec) = sampled_ce(H, y, model.p.d["E"] if model.erank == 0 else Ec0, cand, logQ, Ec=Ec0)
+            neg = rng_neg.choice(V, size=args.ssk, replace=True, p=ssq)
+            yh = asnumpy(y)
+            cand = hnp.union1d(hnp.unique(yh), neg).astype(hnp.int64)
+            logQ = hnp.log1p(-hnp.power(1.0 - ssq[cand], args.ssk))    # log(1−(1−q)^K)
+            logQ[hnp.isin(cand, yh)] = 0.0                             # цели всегда в наборе
+            cand_d, logQ_d = to_dev(cand), to_dev(logQ)
+            Ec0 = (model.p.d["U"][cand_d] @ model.p.d["P"]) if model.erank > 0 else None
+            loss, (dz, cand, Ec) = sampled_ce(H, y, model.p.d["E"] if model.erank == 0 else Ec0, cand_d, logQ_d, Ec=Ec0)
             head_cache = (cand, dz, Ec)
             dz = None
         else:
@@ -837,10 +839,11 @@ def main():
                 vle = vloss()
                 for k in ew: model.p.d[k][...] = bk[k]
                 rec["val_ppl_ema"] = round(float(math.exp(vle)), 2)
+            if N0_TRUNK is not None: rec["wn"] = round(trunk_ratio(model.p.d, N0_TRUNK), 3)
             print(json.dumps(rec), flush=True); logf.write(json.dumps(rec) + "\n"); logf.flush()
-    np.savez(f"{ROOT}/results/ckpt_{args.tag}.npz", **model.p.d)
+    save_npz(f"{ROOT}/results/ckpt_{args.tag}.npz", model.p.d)
     if ew is not None:
-        np.savez(f"{ROOT}/results/ckpt_{args.tag}_ema.npz", **{k: ew[k] / ew_corr for k in ew})
+        save_npz(f"{ROOT}/results/ckpt_{args.tag}_ema.npz", {k: ew[k] / ew_corr for k in ew})
     print("SUMMARY " + json.dumps(dict(tag=args.tag, kind=args.kind, params=nparams,
         tokens=toks, wall_s=round(time.time() - t0, 1), tok_s=round(toks / (time.time() - t0), 1),
         final_val_loss=rec["val_loss"], final_val_ppl=rec["val_ppl"])), flush=True)
@@ -880,6 +883,8 @@ def ap_parse():
     ap.add_argument("--ssk", type=int, default=0, help="sampled softmax: K негативов/шаг (0 = полный CE)")
     ap.add_argument("--ssfull", type=float, default=0.0, help="доля финальных шагов с полным CE (аннил)")
     ap.add_argument("--ssalpha", type=float, default=1.0, help="степень сглаживания unigram-предложения (word2vec 0.75)")
+    ap.add_argument("--negrng", type=int, default=0, help="1 = отдельный rng-поток для негативов (парность порядка данных между конфигами)")
+    ap.add_argument("--trunknorm", type=int, default=0, help="1 = лог ‖W_trunk‖/‖W₀‖ в jsonl (авто-DQ мёртвых прогонов)")
     ap.add_argument("--erank", type=int, default=0, help="низкоранговый tied-эмбеддинг U(V,r)@P(r,D); 0 = выкл")
     return ap.parse_args()
 

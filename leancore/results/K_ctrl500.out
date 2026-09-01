@@ -1,0 +1,14 @@
+[K_ctrl500] nano-ema params=2,591,616
+[K_ctrl500] sampled softmax: K=512 негативов/шаг, unigram-предложение, logQ-коррекция; вал — полный softmax
+{"step": 0, "train_loss": 8.8216, "val_loss": 9.0217, "val_ppl": 8280.71, "wall": 2.4, "tok_s": 961.7, "tokens": 2304}
+{"step": 50, "train_loss": 7.606, "val_loss": 7.3734, "val_ppl": 1592.99, "wall": 27.1, "tok_s": 4341.1, "tokens": 117504}
+{"step": 100, "train_loss": 6.1929, "val_loss": 6.0801, "val_ppl": 437.07, "wall": 50.4, "tok_s": 4613.3, "tokens": 232704}
+{"step": 150, "train_loss": 5.7786, "val_loss": 5.7713, "val_ppl": 320.95, "wall": 74.9, "tok_s": 4647.0, "tokens": 347904}
+{"step": 200, "train_loss": 5.7504, "val_loss": 5.5581, "val_ppl": 259.33, "wall": 99.7, "tok_s": 4645.0, "tokens": 463104}
+{"step": 250, "train_loss": 5.4094, "val_loss": 5.4237, "val_ppl": 226.71, "wall": 125.0, "tok_s": 4627.0, "tokens": 578304}
+{"step": 300, "train_loss": 5.4107, "val_loss": 5.3462, "val_ppl": 209.81, "wall": 150.1, "tok_s": 4619.8, "tokens": 693504}
+{"step": 350, "train_loss": 5.2803, "val_loss": 5.2832, "val_ppl": 197.01, "wall": 175.1, "tok_s": 4617.5, "tokens": 808704}
+{"step": 400, "train_loss": 5.2797, "val_loss": 5.2481, "val_ppl": 190.2, "wall": 201.3, "tok_s": 4589.1, "tokens": 923904}
+{"step": 450, "train_loss": 5.3121, "val_loss": 5.2213, "val_ppl": 185.17, "wall": 229.0, "tok_s": 4537.7, "tokens": 1039104}
+{"step": 499, "train_loss": 5.2219, "val_loss": 5.202, "val_ppl": 181.64, "wall": 256.0, "tok_s": 4499.4, "tokens": 1152000}
+SUMMARY {"tag": "K_ctrl500", "kind": "ema", "params": 2591616, "tokens": 1152000, "wall_s": 256.1, "tok_s": 4499.0, "final_val_loss": 5.202, "final_val_ppl": 181.64}

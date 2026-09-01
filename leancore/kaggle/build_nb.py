@@ -1,0 +1,329 @@
+#!/usr/bin/env python3
+"""build_nb.py — собирает AIra_TOURNAMENT.ipynb из реальных файлов kaggle/.
+Запуск: python3 build_nb.py → валидный ipynb рядом. Источник истины — файлы.
+"""
+import json, pathlib
+
+HERE = pathlib.Path(__file__).resolve().parent
+
+def rd(name):
+    return (HERE / name).read_text(encoding="utf-8")
+
+def md(src):
+    return {"cell_type": "markdown", "metadata": {}, "source": src.splitlines(keepends=True)}
+
+def code(src):
+    return {"cell_type": "code", "execution_count": None, "metadata": {},
+            "outputs": [], "source": src.splitlines(keepends=True)}
+
+LCXP = rd("lcxp.py")
+FORK = rd("nano_lc_kg.py")
+TT = rd("train_torch.py")
+EVO = rd("evo.py")
+
+cells = []
+
+cells.append(md("""# EVO-ТУРНИР КОНФИГОВ LeanCore · Kaggle GPU T4×2 / P100
+
+**Что делает**: ЭВОЛЮЦИОННЫЙ поиск (не перебор) по непрерывным скалярам (`mulr, ssfull, ssk,
+ssalpha, lr`) — популяция развивается: селекция → кроссовер → мутации с адаптивным шагом σ
+(правило 1/5), зал славы (HOF) по всей истории поколений. Методология проекта AIra/LeanCore:
+
+- **CTRL** = рецепт чемпиона — вечный якорный элит в каждом поколении; фитнес = ΔPPL к CTRL
+  ЭТОГО ЖЕ поколения (снимает дрейф между поколениями)
+- Парность: битово общий инит (crc32-имена; torch с v3 инициализируется ТЕМ ЖЕ numpy-потоком —
+  иначе гейт меряет шум инита, измерено: relΔ@40=2.0044% при пороге 2%), `negrng`-разделение
+- Предохранители: авто-DQ «мёртвых» (`wn<3` после шага 100), NaN; прогнозы E1–E5 зафиксированы ДО запуска
+- Стадии: **A qual** 16 конфигов @60 (отсев дна) → **B evo** популяция 8 × 3 поколения @200 ×2 сида
+  → **C final** HOF-3 + CTRL @1500 × 4 сида
+- Всё сохраняется в `evo_state.json` после каждой джобы → переживает таймаут сессии
+
+## Как запустить
+1. **Accelerator**: Settings → GPU T4 x2 (рекомендуется) или P100. Квота ~30 GPU-часов/нед (T4×2 тратит её быстрее — следите в интерфейсе).
+2. **Данные**: три варианта (ячейка 3 разберёт сама): (а) приатачить Kaggle-датасет с `train.npy/val.npy/meta.json` корпуса `prep`; (б) положить их в `/kaggle/working/prep_data/`; (в) Internet ON → скачает с raw.githubusercontent нашей ветки.
+3. **Run All**. Сначала пройдёт GPU-гейт честности (torch-GPU против numpy-CPU на 40 шагах CTRL), потом брекет.
+4. По таймауту/завершении: **Save Version**. Для продолжения — новая сессия: Add Data → «Notebook Output Files» предыдущей версии → Run (state подхватится сам).
+
+## Что вернуть в проект
+Файлы из Output: `airaw/evo_work/EVO_SUMMARY.md`, `PREDICTIONS.md`, `evo_state.json`, и `results/*.jsonl` (+ `ckpt_*` финалистов). Сводку вставить в чат — я разберу против PREDICTIONS и запишу в TRICKS.
+"""))
+
+cells.append(md("## 0 · Окружение и пути"))
+
+cells.append(code("""import os, sys, json, glob, time, shutil, subprocess, pathlib
+ON_KAGGLE = os.path.exists("/kaggle/working")
+BASE = "/kaggle/working/airaw" if ON_KAGGLE else os.path.abspath("./airaw_local")
+os.makedirs(BASE, exist_ok=True)
+print("kaggle:", ON_KAGGLE, "| BASE:", BASE, "| cpu:", os.cpu_count())
+WORK = os.path.join(BASE, "evo_work")
+os.makedirs(WORK, exist_ok=True)
+"""))
+
+cells.append(md("## 1 · Файлы движка (lcxp / nano_lc_kg / train_torch / evo)"))
+
+cells.append(code(f"open(f'{{BASE}}/lcxp.py','w').write({json.dumps(LCXP)})\nprint('lcxp.py ok')"))
+
+cells.append(code(f"open(f'{{BASE}}/nano_lc_kg.py','w').write({json.dumps(FORK)})\nprint('nano_lc_kg.py ok')"))
+
+cells.append(code(f"open(f'{{BASE}}/train_torch.py','w').write({json.dumps(TT)})\nprint('train_torch.py ok')"))
+
+cells.append(code(f"open(f'{{BASE}}/evo.py','w').write({json.dumps(EVO)})\nprint('evo.py ok')"))
+
+cells.append(md("""## 2 · Данные (prep: train.npy / val.npy / meta.json)
+
+Порядок поиска: (а) любой приаттаченный датасет `/kaggle/input/*/` с тремя файлами;
+(б) локальная папка `/kaggle/working/prep_data/`; (в) скачивание с raw.githubusercontent
+(нужен Internet ON). + попытка подтянуть `lc_kernels.so` для ускорения numpy-пути (необязательно)."""))
+
+cells.append(code("""import glob, os, shutil, urllib.request
+
+dst = os.path.join(BASE, "data", "prep")
+os.makedirs(dst, exist_ok=True)
+need = ("train.npy", "val.npy", "meta.json")
+
+def have(d): return all(os.path.exists(os.path.join(d, f)) for f in need)
+
+src = None
+for d in sorted(glob.glob("/kaggle/input/*")) + ["/kaggle/working/prep_data"]:
+    if have(d): src = d; break
+
+if src:
+    for f in need: shutil.copy(os.path.join(src, f), os.path.join(dst, f))
+    print("данные из датасета:", src)
+else:
+    RAW = "https://raw.githubusercontent.com/Riyozaki/AIra/arena/01a04a42-aira/leancore/data/prep/"
+    for f in need:
+        print("скачиваю", f, "...")
+        urllib.request.urlretrieve(RAW + f, os.path.join(dst, f))
+    print("данные скачаны с GitHub raw")
+
+# lc_kernels: НЕ чужой бинарь (-march=native на другом CPU = риск SIGILL).
+# Собираем из lc_kernels.c на этой машине и проверяем self-test'ом; иначе numpy-фолбэк.
+import subprocess as _sp, sys as _sys
+KSTAT = "off"
+def _dl(f):
+    urllib.request.urlretrieve(
+        "https://raw.githubusercontent.com/Riyozaki/AIra/arena/01a04a42-aira/leancore/" + f,
+        os.path.join(BASE, f))
+try:
+    _dl("lc_kernels.c")
+    rc = _sp.run(["gcc", "-O3", "-march=native", "-shared", "-fPIC",
+                  "lc_kernels.c", "-o", "lc_kernels.so", "-lm"],
+                 cwd=BASE, capture_output=True, text=True)
+    if rc.returncode != 0:
+        raise RuntimeError((rc.stderr or "")[:300])
+    KSTAT = "built"
+    print("ядра собраны из lc_kernels.c")
+except Exception as e:
+    print("сборка не удалась ({}), пробую готовый .so:".format(type(e).__name__))
+    try:
+        _dl("lc_kernels.so"); KSTAT = "downloaded"
+    except Exception as e2:
+        print("lc_kernels.so недоступен — чистый numpy:", type(e2).__name__)
+if KSTAT in ("built", "downloaded"):
+    KPROBE = ("import ctypes,sys,numpy as np;"
+              "L=ctypes.CDLL(sys.argv[1]);F=ctypes.POINTER(ctypes.c_float);"
+              "x=np.random.RandomState(0).randn(4608).astype(np.float32);y=np.empty_like(x);t=np.empty_like(x);"
+              "L.k_gelu_fwd.argtypes=[F,F,F,ctypes.c_int64];"
+              "L.k_gelu_fwd(x.ctypes.data_as(F),y.ctypes.data_as(F),t.ctypes.data_as(F),x.size);"
+              "g=np.tanh(0.7978845608028654*(x+0.044715*x**3));"
+              "err=float(np.abs(y-0.5*x*(1.0+g)).max());"
+              "print('gelu err', err);raise SystemExit(0 if err < 1e-4 else 2)")
+    open(os.path.join(BASE, "_kprobe.py"), "w").write(KPROBE)
+    probe = _sp.run([_sys.executable, "_kprobe.py", os.path.join(BASE, "lc_kernels.so")],
+                    cwd=BASE, capture_output=True, text=True, timeout=180)
+    if probe.returncode == 0:
+        print("ядра self-test:", probe.stdout.strip())
+    else:
+        print("ядра НЕ прошли self-test (чужая ISA?) → LC_SKIP_KERNELS=1:",
+              ((probe.stderr or probe.stdout).strip()[-200:]))
+        KSTAT = "skipped"
+os.environ["LC_SKIP_KERNELS"] = "1" if KSTAT == "skipped" else "0"
+import numpy as np, json as _j
+tr = np.load(os.path.join(dst, "train.npy"))
+print("train tokens:", len(tr), "| vocab:", _j.load(open(os.path.join(dst, 'meta.json')))['vocab'])
+PREP = "data/prep"
+"""))
+
+cells.append(md("""## 3 · GPU-гейт честности и выбор движка
+
+Если есть CUDA: прогон CTRL 40 шагов на **torch-GPU** и на **numpy-CPU** с одним сидом.
+Критерий: |Δval_ppl| ≤ 2% → engine=torch (весь брекет на torch-GPU), иначе engine=numpy и
+брекет едет на CPU-воркерах — но ни один бит плохих данных не попадёт в таблицу."""))
+
+cells.append(code("""STRICT_GPU = True   # GPU-квота оплачена: работать на CPU = инцидент, а не фолбэк
+
+def run_once(engine, steps=40, seed=1):
+    import subprocess, json
+    env = dict(os.environ)
+    if engine == "torch":
+        env["LC_SKIP_KERNELS"] = "1"
+        cmd = [sys.executable, os.path.join(BASE, "train_torch.py"), "--steps", str(steps),
+               "--eval_every", "20", "--ssk", "512", "--ssfull", "0.12", "--seed", str(seed),
+               "--negrng", "1", "--trunknorm", "1", "--tag", f"gate_{engine}", "--data", PREP]
+    else:
+        env["LC_BACKEND"] = engine          # numpy | cupy
+        if engine == "cupy":
+            env["LC_SKIP_KERNELS"] = "1"
+        cmd = [sys.executable, os.path.join(BASE, "nano_lc_kg.py"), "--kind", "ema", "--opt", "muon",
+               "--steps", str(steps), "--eval_every", "20", "--ssk", "512", "--ssfull", "0.12",
+               "--seed", str(seed), "--negrng", "1", "--trunknorm", "1", "--tag", f"gate_{engine}",
+               "--data", PREP]
+    try:
+        r = subprocess.run(cmd, cwd=BASE, env=env, capture_output=True, text=True, timeout=3600)
+    except Exception as e:
+        print(f"[gate:{engine}] запуск не удался: {type(e).__name__}: {e}")
+        return None, 0.0, []
+    if r.returncode != 0:
+        print(f"[gate:{engine}] КРАШ rc={r.returncode} -- хвост stderr:")
+        print((r.stderr or "")[-2500:]); print("--- stdout ---"); print((r.stdout or "")[-1200:])
+        return None, 0.0, []
+    p = os.path.join(BASE, "results", f"run_gate_{engine}.jsonl")
+    if not os.path.exists(p):
+        print(f"[gate:{engine}] НЕТ {p}! rc=0, но результат не записан. stderr:")
+        print((r.stderr or "")[-2500:])
+        return None, 0.0, []
+    rows = [json.loads(l) for l in open(p) if l.strip().startswith("{")]
+    if not rows:
+        print(f"[gate:{engine}] jsonl пуст"); return None, 0.0, []
+    return rows[-1]["val_ppl"], float(rows[-1].get("tok_s") or 0.0), rows
+
+NGPU, TORCH_OK, CUPY_OK = 0, False, False
+try:
+    import torch
+    TORCH_OK = True
+    NGPU = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    print("torch", torch.__version__, "| cuda устройств:", NGPU,
+          [torch.cuda.get_device_name(i) for i in range(NGPU)] if NGPU else "")
+except Exception as e:
+    print("torch недоступен:", type(e).__name__)
+try:
+    import cupy as _cp
+    _t = _cp.asarray([1.0], dtype=_cp.float32); _ = float(_t.sum())
+    CUPY_OK = NGPU > 0 or True
+    print("cupy", _cp.__version__, "— numpy-движок доступен на GPU (полная семантика модели)")
+except Exception as e:
+    print("cupy недоступен:", type(e).__name__)
+
+ENGINE = "numpy"
+REF, REFSPD, rows_ref = run_once("numpy", steps=40, seed=1)
+assert REF is not None, "numpy-референс не отработал (лог выше) — стоп"
+print(f"референс numpy/CPU: ppl={REF:.2f} tok/s={REFSPD:.0f}")
+GATE_TAB = []
+for cand in ([m for m, ok in (("torch", TORCH_OK and NGPU > 0), ("cupy", CUPY_OK)) if ok]):
+    ppl, spd, rows = run_once(cand, steps=40, seed=1)
+    if ppl is None:
+        GATE_TAB.append((cand, None, None, 0.0, "упал")); continue
+    d = abs(ppl - REF) / REF
+    GATE_TAB.append((cand, ppl, d, spd, "ok" if d <= 0.02 else f"расхождение {d:.2%}>2%"))
+print("\\n{:<7} {:>9} {:>9} {:>8}  вердикт".format("движок", "val_ppl", "относ.Δ", "tok/s"))
+for m, ppl, d, spd, note in GATE_TAB:
+    print("{:<7} {:>9} {:>9} {:>8}  {}".format(
+        m, "—" if ppl is None else f"{ppl:.2f}", "—" if d is None else f"{d:.3%}", f"{spd:.0f}", note))
+ok = [(m, ppl, d, spd) for m, ppl, d, spd, note in GATE_TAB if ppl is not None and d <= 0.02]
+WHY = "cuda не видна (NGPU=0)"
+if ok:
+    ok.sort(key=lambda t: -t[3])
+    ENGINE = ok[0][0]
+    WHY = f"гейт пройден: {ENGINE} Δ={ok[0][2]:.2%}, ×{ok[0][3]/max(REFSPD,1):.2f} к CPU"
+elif NGPU > 0 or CUPY_OK:
+    WHY = "ни один GPU-движок не прошёл гейт — логи выше"
+    if STRICT_GPU:
+        raise RuntimeError("GPU-движки не прошли гейт корректности (см. таблицу). "
+                           "GPU-квота оплачена: жечь её на CPU нельзя. Пришли этот вывод в проект; "
+                           "сознательный CPU-прогон: STRICT_GPU=False в этой ячейке.")
+NWORKERS = NGPU if ENGINE in ("torch", "cupy") else max(1, min(3, (os.cpu_count() or 2) - 1))
+print("=" * 64)
+print("ENGINE:", ENGINE, "| WORKERS:", NWORKERS, "|", WHY)
+if ENGINE == "numpy" and (NGPU > 0 or CUPY_OK):
+    print("!" * 64)
+    print("! GPU НЕ БУДЕТ ГРУЗИТЬСЯ, но GPU-КВОТА ГОРИТ. Вариант: Accelerator → None и Run All.")
+    print("!" * 64)
+json.dump(dict(engine=ENGINE, workers=NWORKERS, ref_ppl=REF, ref_tok_s=REFSPD,
+               gate=[[m, ppl, d, s, n] for m, ppl, d, s, n in GATE_TAB], why=WHY),
+          open(os.path.join(BASE, "engine.json"), "w"), ensure_ascii=False, indent=1)
+print("=" * 64)"""))
+
+cells.append(md("## 4 · Предсказания (зафиксированы ДО запуска — в PREDICTIONS.md)"))
+
+cells.append(code("""print(open(os.path.join(WORK, "PREDICTIONS.md")).read() if os.path.exists(os.path.join(WORK, "PREDICTIONS.md")) else "(запишется init'ом ниже)")"""))
+
+cells.append(md("""## 5 · Запуск брекета (init + воркеры + монитор)
+
+`TARGET_HOURS` — мягкий стоп монитора (брекет сам сохраняет всё, что досчитал;
+продолжение — следующая сессия). На T4×2: воркер на GPU. На P100: один. CPU-фолбэк: 3 воркера."""))
+
+cells.append(code("""TARGET_HOURS = 10.0   # под сессию 12ч с запасом
+
+def shout(*a): print(*a, flush=True)
+
+subprocess.run([sys.executable, os.path.join(BASE, "evo.py"), "init",
+                "--workdir", WORK, "--data", PREP], cwd=BASE, check=True)
+
+procs = []
+for wid in range(NWORKERS):
+    env = dict(os.environ)
+    if ENGINE == "torch":
+        cmd = [sys.executable, os.path.join(BASE, "evo.py"), "worker", "--id", str(wid),
+               "--engine", "torch", "--cuda", str(wid % max(1, NGPU)), "--workdir", WORK, "--data", PREP]
+    elif ENGINE == "cupy":
+        env["LC_BACKEND"] = "cupy"
+        cmd = [sys.executable, os.path.join(BASE, "evo.py"), "worker", "--id", str(wid),
+               "--engine", "numpy", "--backend", "cupy", "--cuda", str(wid % max(1, NGPU)),
+               "--workdir", WORK, "--data", PREP]
+    else:
+        env["OPENBLAS_NUM_THREADS"] = str(max(1, (os.cpu_count() or 2) // max(1, NWORKERS)))
+        cmd = [sys.executable, os.path.join(BASE, "evo.py"), "worker", "--id", str(wid),
+               "--engine", "numpy", "--backend", "numpy", "--workdir", WORK, "--data", PREP]
+    procs.append(subprocess.Popen(cmd, cwd=BASE, env=env))
+    shout(f"воркер {wid} запущен (pid {procs[-1].pid})")
+
+t0 = time.time()
+while True:
+    alive = sum(p.poll() is None for p in procs)
+    st = subprocess.run([sys.executable, os.path.join(BASE, "evo.py"), "status",
+                         "--workdir", WORK], cwd=BASE, capture_output=True, text=True).stdout.strip()
+    shout(f"--- t+{(time.time()-t0)/3600:.2f}ч | воркеров живо: {alive}\\n{st}")
+    if alive == 0:
+        shout("все воркеры завершились"); break
+    if (time.time() - t0) / 3600 > TARGET_HOURS:
+        shout("мягкий стоп монитора: процессы остаются, состояние сохранено"); break
+    time.sleep(60)
+"""))
+
+cells.append(md("## 6 · Итоги и артефакты"))
+
+cells.append(code("""subprocess.run([sys.executable, os.path.join(BASE, "evo.py"), "summary",
+                "--workdir", WORK], cwd=BASE, check=True)
+print("=== файлы для скачивания/продолжения ===")
+for f in sorted(glob.glob(os.path.join(WORK, "*")) + glob.glob(os.path.join(BASE, "results", "*.jsonl"))
+                  + glob.glob(os.path.join(BASE, "results", "ckpt_bk_*.npz"))):
+    print(f"{os.path.getsize(f)/1e6:8.2f} MB  {f}")
+"""))
+
+cells.append(md("""## 7 · Продолжение после таймаута
+
+1. **Save Version** (все файлы Output сохранятся).
+2. В новой сессии этого же ноутбука: **Add Data → Notebook Output Files** предыдущей версии.
+   `init` сам найдёт `evo_state.json` в `/kaggle/input/*/` и продолжит с места обрыва
+   (зависшие джобы вернутся в pending, готовые не повторятся).
+3. Не запускайте две сессии брекета одновременно на одном state — файловые локи не расчитаны на это.
+
+### Что пасти в чат проекта
+Содержимое `airaw/evo_work/EVO_SUMMARY.md` целиком + финальную таблицу из ячейки 6.
+Я сверю с предсказаниями E1–E5, дам вердикты с метками и внесу в TRICKS."""))
+
+nb = {
+    "nbformat": 4, "nbformat_minor": 5,
+    "metadata": {
+        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+        "language_info": {"name": "python", "version": "3.10"},
+        "kaggle": {"accelerator": "nvidiaTeslaT4", "dataSources": [], "isGpuEnabled": True,
+                   "isInternetEnabled": True, "language": "python", "sourceType": "notebook"},
+    },
+    "cells": cells,
+}
+
+out = HERE / "AIra_TOURNAMENT.ipynb"
+out.write_text(json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8")
+print(f"[build_nb] {out} — {len(cells)} ячеек, {out.stat().st_size/1024:.0f} KB")
