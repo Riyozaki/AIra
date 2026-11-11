@@ -1,0 +1,16 @@
+{
+ "threads_env": "default",
+ "nproc": 2,
+ "gemm_float32_GFLOPs_median": 244.3,
+ "gemm_float32_GFLOPs_best": 246.72,
+ "gemm_float64_GFLOPs_median": 137.6,
+ "gemm_float64_GFLOPs_best": 138.58,
+ "copy_GBps_median": 19.18,
+ "copy_GBps_best": 20.44,
+ "add_GBps_median": 9.16,
+ "read_sum_GBps_median": 10.02,
+ "gemv_fp32_GBps_median": 24.58,
+ "gemv_fp32_GFLOPs_median": 12.29,
+ "gemv_small_cached_GBps_median": 56.94,
+ "gemv_small_cached_GFLOPs_median": 28.47
+}
