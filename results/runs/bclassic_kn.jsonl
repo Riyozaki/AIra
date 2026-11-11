@@ -1,0 +1,5 @@
+{"model": "mKN-byte", "K": 3, "n": 4, "split": "valid", "train_bytes": 90000000, "bpb": 2.512012820097654, "build_s": 3.2, "score_s": 4.7, "table_entries": 1391872}
+{"model": "mKN-byte", "K": 4, "n": 5, "split": "valid", "train_bytes": 90000000, "bpb": 2.1209987695412287, "build_s": 4.0, "score_s": 7.8, "table_entries": 4703132}
+{"model": "mKN-byte", "K": 5, "n": 6, "split": "valid", "train_bytes": 90000000, "bpb": 1.9239756024914314, "build_s": 5.1, "score_s": 11.8, "table_entries": 11465911}
+{"model": "mKN-byte", "K": 6, "n": 7, "split": "valid", "train_bytes": 90000000, "bpb": 1.830687392518846, "build_s": 6.9, "score_s": 16.4, "table_entries": 22976717}
+{"model": "mKN-byte", "K": 7, "n": 8, "split": "valid", "train_bytes": 90000000, "bpb": 1.7791203120601158, "build_s": 9.3, "score_s": 20.8, "table_entries": 40422341}
