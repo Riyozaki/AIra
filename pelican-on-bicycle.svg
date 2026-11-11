@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900" role="img" aria-labelledby="title desc">
+  <title id="title">Pelican on a bicycle</title>
+  <desc id="desc">A cheerful pelican rides a coral bicycle along a seaside promenade at sunset.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#463b80"/>
+      <stop offset="0.48" stop-color="#f28b87"/>
+      <stop offset="1" stop-color="#ffd59c"/>
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f83a2"/>
+      <stop offset="1" stop-color="#07556f"/>
+    </linearGradient>
+    <linearGradient id="beak" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffc55d"/>
+      <stop offset="0.52" stop-color="#f79452"/>
+      <stop offset="1" stop-color="#d85d49"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7faf4"/>
+      <stop offset="0.72" stop-color="#d8edf0"/>
+      <stop offset="1" stop-color="#b6dce0"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#193a59" flood-opacity=".26"/>
+    </filter>
+    <filter id="soft" x="-10%" y="-20%" width="120%" height="140%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="3" cy="3" r="2" fill="#ffffff" opacity=".38"/>
+    </pattern>
+  </defs>
+
+  <!-- sunset -->
+  <rect width="1200" height="900" fill="url(#sky)"/>
+  <circle cx="930" cy="204" r="96" fill="#ffe5a6" opacity=".96"/>
+  <circle cx="930" cy="204" r="142" fill="#ffe5a6" opacity=".18" filter="url(#soft)"/>
+  <g fill="#f9c9aa" opacity=".55">
+    <path d="M0 285c92-43 159-52 262-17 90 31 158 27 241-15 81-41 174-32 249 4 85 41 177 28 272-20 76-38 132-30 176-7v126H0z"/>
+  </g>
+  <path d="M0 410c116-31 203-21 309 2 101 22 177 20 281-5 102-24 195-25 286 6 112 37 208 23 324-11v239H0z" fill="url(#sea)"/>
+  <path d="M0 474c101-23 198-17 300 2 97 19 201 20 310-4 89-20 196-26 296 4 96 29 199 24 294-6" fill="none" stroke="#b2e3d6" stroke-width="10" opacity=".55"/>
+  <path d="M50 535c92-17 175-15 266 5m169-19c109-21 207-12 319 11m129-4c96-14 169-11 242 5" fill="none" stroke="#d0f3e3" stroke-width="7" stroke-linecap="round" opacity=".48"/>
+  <path d="M0 620c130-38 266-41 406-9 142 33 265 38 411 10 150-29 282-20 383 7v272H0z" fill="#f7d5a4"/>
+  <path d="M0 680c145-29 276-23 413 10 129 31 284 26 416-5 148-35 272-29 371-5v220H0z" fill="#f4bd7e"/>
+  <path d="M0 736c161-29 305-26 444 4 126 27 250 29 381 1 151-33 282-29 375-1v160H0z" fill="url(#dots)" opacity=".25"/>
+
+  <!-- distant gulls -->
+  <g fill="none" stroke="#fff6e7" stroke-width="6" stroke-linecap="round" opacity=".8">
+    <path d="M204 183q17-16 34 0q17-16 34 0"/>
+    <path d="M714 150q13-12 26 0q13-12 26 0"/>
+    <path d="M1058 321q12-11 24 0q12-11 24 0"/>
+  </g>
+
+  <!-- pier plants -->
+  <g opacity=".88">
+    <path d="M96 621q-16-111 7-160q12 83 10 160m-21-85q-34-49-50-40q31 40 57 84m20-50q28-41 41-37q-16 37-39 71" fill="none" stroke="#236a69" stroke-width="12" stroke-linecap="round"/>
+    <path d="M1090 632q-17-89 17-142q-1 90-2 141m-18-55q-39-38-53-28q33 31 58 62m20-57q32-33 44-28q-23 31-42 61" fill="none" stroke="#236a69" stroke-width="12" stroke-linecap="round"/>
+  </g>
+
+  <!-- bicycle ground shadow -->
+  <ellipse cx="596" cy="785" rx="410" ry="38" fill="#9b6a5d" opacity=".23" filter="url(#soft)"/>
+
+  <!-- bicycle -->
+  <g filter="url(#shadow)">
+    <g fill="none" stroke="#17394e" stroke-width="18">
+      <circle cx="373" cy="683" r="125"/>
+      <circle cx="803" cy="683" r="125"/>
+    </g>
+    <g fill="none" stroke="#f8f2d9" stroke-width="7" opacity=".85">
+      <circle cx="373" cy="683" r="89"/>
+      <circle cx="803" cy="683" r="89"/>
+    </g>
+    <g stroke="#f8f2d9" stroke-width="5" opacity=".75">
+      <path d="M373 558v250M248 683h250M285 595l176 176M461 595L285 771"/>
+      <path d="M803 558v250M678 683h250M715 595l176 176M891 595L715 771"/>
+    </g>
+    <g fill="none" stroke="#e95d62" stroke-width="23" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M373 683 487 481 604 683 373 683 545 683 674 471 803 683 604 683Z"/>
+      <path d="M487 481 574 481"/>
+      <path d="M674 471 711 390 806 390"/>
+    </g>
+    <path d="M528 465h102" stroke="#17394e" stroke-width="22" stroke-linecap="round"/>
+    <path d="M778 365q27-23 57 1" fill="none" stroke="#17394e" stroke-width="18" stroke-linecap="round"/>
+    <circle cx="545" cy="683" r="29" fill="#ffd166" stroke="#17394e" stroke-width="12"/>
+    <path d="M545 683 594 718m-49-35-54 30" fill="none" stroke="#17394e" stroke-width="13" stroke-linecap="round"/>
+    <path d="M291 527h167" stroke="#f8f2d9" stroke-width="14" stroke-linecap="round"/>
+  </g>
+
+  <!-- pelican legs behind body -->
+  <g stroke="#df8357" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M530 543 560 634 594 718"/>
+    <path d="M643 535 622 629 569 713"/>
+  </g>
+  <g fill="#f6a05e" stroke="#bd644b" stroke-width="7">
+    <path d="M580 705q27-4 39 14l-32 19q-31 6-43-7z"/>
+    <path d="M543 699q-22 0-35 21l37 12q25-3 33-19z"/>
+  </g>
+
+  <!-- pelican body -->
+  <g filter="url(#shadow)">
+    <path d="M475 537q-49-35-48-140 1-143 107-178 101-33 178 37 83 75 44 220-23 83-104 109-104 34-177-48z" fill="url(#body)" stroke="#17394e" stroke-width="15" stroke-linejoin="round"/>
+    <!-- belly sheen -->
+    <path d="M505 511q-40-75-7-169 24-69 85-86-54 89-23 201 21 76 76 113-88 14-131-59z" fill="#ffffff" opacity=".62"/>
+    <!-- wing -->
+    <path d="M493 406q49-63 121-35 77 26 99 120-68 70-171 31-55-21-49-116z" fill="#82c5c9" stroke="#17394e" stroke-width="14"/>
+    <path d="M521 424q73 16 143 90m-115-113q50 15 94 72m-98-17q39 12 80 55" fill="none" stroke="#4f969e" stroke-width="12" stroke-linecap="round" opacity=".75"/>
+    <!-- neck and head -->
+    <path d="M517 333q-27-65 11-120 39-58 113-37 62 18 72 81 6 45-27 87-35 44-86 30-47-13-83-41z" fill="url(#body)" stroke="#17394e" stroke-width="15"/>
+    <!-- crown -->
+    <path d="M556 204q-3-50 25-78m7 78q17-54 55-67m-23 83q46-43 76-31" fill="none" stroke="#17394e" stroke-width="13" stroke-linecap="round"/>
+    <!-- eye -->
+    <circle cx="651" cy="251" r="19" fill="#fff9df" stroke="#17394e" stroke-width="9"/>
+    <circle cx="656" cy="255" r="8" fill="#17394e"/>
+    <circle cx="660" cy="250" r="3" fill="#fff"/>
+    <!-- cheek -->
+    <ellipse cx="614" cy="287" rx="27" ry="15" fill="#f0a08a" opacity=".55"/>
+    <!-- beak and pouch -->
+    <path d="M666 270q112 10 206 72-117 30-218 4-34-7-48-29 20-39 60-47z" fill="url(#beak)" stroke="#17394e" stroke-width="15" stroke-linejoin="round"/>
+    <path d="M694 324q104 23 178 18-35 111-139 87-69-16-99-78 26-27 60-27z" fill="#f58b5c" stroke="#17394e" stroke-width="15" stroke-linejoin="round"/>
+    <path d="M707 349q66 26 133 10" fill="none" stroke="#ffcb7b" stroke-width="10" stroke-linecap="round" opacity=".75"/>
+    <path d="M744 399q46 2 74-20" fill="none" stroke="#d86150" stroke-width="10" stroke-linecap="round"/>
+    <!-- small smile -->
+    <path d="M672 302q17 16 37 1" fill="none" stroke="#17394e" stroke-width="7" stroke-linecap="round"/>
+  </g>
+
+  <!-- handlebar wing grip -->
+  <path d="M652 435q67-24 128-42l14 34q-79 37-131 51z" fill="#82c5c9" stroke="#17394e" stroke-width="14" stroke-linejoin="round"/>
+  <path d="M763 399q29-19 43 10l-22 23q-24-5-21-33z" fill="#f7faf4" stroke="#17394e" stroke-width="10"/>
+
+  <!-- details foreground -->
+  <g fill="#ed8b74" opacity=".9">
+    <circle cx="151" cy="772" r="9"/><circle cx="188" cy="813" r="7"/><circle cx="1022" cy="778" r="9"/><circle cx="1058" cy="823" r="7"/>
+  </g>
+  <g fill="#fff8df" opacity=".9">
+    <path d="M246 749l7 16 17 2-13 11 4 17-15-9-15 9 4-17-13-11 17-2z"/>
+    <path d="M951 746l6 13 15 2-11 10 3 15-13-8-13 8 3-15-11-10 15-2z"/>
+  </g>
+  <rect x="0" y="0" width="1200" height="900" fill="none" stroke="#17394e" stroke-width="26" opacity=".16"/>
+</svg>
