@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-labelledby="title description">
+  <title id="title">Pelican riding a bicycle</title>
+  <desc id="description">A cheerful pelican pedaling a bright bicycle beside the sea.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8ed6f5"/>
+      <stop offset="1" stop-color="#eaf8fc"/>
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#39b8d3"/>
+      <stop offset="1" stop-color="#087da6"/>
+    </linearGradient>
+    <linearGradient id="beak" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd87a"/>
+      <stop offset="1" stop-color="#f1a63f"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="9"/>
+      <feOffset dy="9"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".22"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .ink { stroke:#173a4a; stroke-width:8; stroke-linecap:round; stroke-linejoin:round; }
+      .thin { stroke:#173a4a; stroke-width:5; stroke-linecap:round; stroke-linejoin:round; }
+    </style>
+  </defs>
+
+  <!-- sky and shoreline -->
+  <rect width="1200" height="800" fill="url(#sky)"/>
+  <circle cx="1015" cy="115" r="57" fill="#ffe68b"/>
+  <g fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" opacity=".9">
+    <path d="M122 134 q18 -17 36 0 q18 -17 36 0"/>
+    <path d="M224 93 q15 -14 30 0 q15 -14 30 0"/>
+    <path d="M362 158 q13 -12 26 0 q13 -12 26 0"/>
+  </g>
+  <path d="M0 384 C165 349 296 400 468 378 C680 350 848 395 1200 345 L1200 800 L0 800Z" fill="url(#sea)"/>
+  <path d="M0 456 C208 416 403 477 599 442 C826 402 995 447 1200 412" fill="none" stroke="#c8f6fb" stroke-width="12" opacity=".8"/>
+  <path d="M0 518 C187 487 383 534 570 500 C787 461 970 508 1200 473" fill="none" stroke="#b1edf3" stroke-width="8" opacity=".55"/>
+  <path d="M0 620 C270 570 461 639 682 591 C893 546 1048 595 1200 568 L1200 800 L0 800Z" fill="#f7d690"/>
+  <path d="M0 678 C173 636 359 697 538 660 C766 613 993 676 1200 633" fill="none" stroke="#e7bd67" stroke-width="12" opacity=".7"/>
+
+  <!-- palms -->
+  <g class="ink" fill="none" opacity=".95">
+    <path d="M86 591 C118 479 117 360 92 280" stroke="#8b5a34" stroke-width="22"/>
+    <g stroke="#27734f" stroke-width="17">
+      <path d="M94 295 C30 260 20 198 51 159 C102 198 111 252 94 295"/>
+      <path d="M94 292 C153 221 225 226 259 258 C194 292 139 307 94 292"/>
+      <path d="M92 286 C133 205 114 143 78 111 C55 188 66 246 92 286"/>
+      <path d="M92 294 C38 318 14 378 20 425 C74 395 102 344 92 294"/>
+    </g>
+  </g>
+
+  <!-- bicycle shadow -->
+  <ellipse cx="645" cy="685" rx="384" ry="33" fill="#a98248" opacity=".25"/>
+
+  <!-- wheels -->
+  <g fill="#f5f5ed" class="ink" filter="url(#shadow)">
+    <circle cx="422" cy="603" r="119"/>
+    <circle cx="819" cy="603" r="119"/>
+  </g>
+  <g class="thin" stroke="#9cc5d1" opacity=".9">
+    <path d="M422 484V722 M303 603H541 M338 519L506 687 M506 519L338 687"/>
+    <path d="M819 484V722 M700 603H938 M735 519L903 687 M903 519L735 687"/>
+  </g>
+  <g fill="#ef785f" class="ink">
+    <circle cx="422" cy="603" r="13"/>
+    <circle cx="819" cy="603" r="13"/>
+  </g>
+
+  <!-- bicycle frame -->
+  <g class="ink" fill="none" stroke="#ef785f" stroke-width="19">
+    <path d="M422 603 L529 425 L650 603 Z"/>
+    <path d="M529 425 L694 421 L819 603"/>
+    <path d="M650 603 L819 603"/>
+    <path d="M694 421 L731 367"/>
+    <path d="M694 421 L642 412"/>
+  </g>
+  <g class="ink" fill="none" stroke="#173a4a" stroke-width="15">
+    <path d="M387 408 L528 425 L552 397"/>
+    <path d="M713 365 L764 365"/>
+    <path d="M395 408 L370 388"/>
+    <path d="M512 611 l68 -29 M580 582 l14 52"/>
+  </g>
+  <ellipse cx="360" cy="383" rx="50" ry="15" fill="#173a4a" transform="rotate(-9 360 383)"/>
+  <path d="M765 363 q48 -48 91 -5" class="ink" fill="none" stroke="#173a4a" stroke-width="14"/>
+
+  <!-- pelican body -->
+  <g filter="url(#shadow)">
+    <path d="M503 436 C456 389 452 310 496 246 C540 182 626 177 684 224 C734 264 733 356 696 438 C666 502 557 503 503 436Z" fill="#f5f4e9" class="ink"/>
+    <path d="M582 239 C595 184 633 156 675 150 C727 143 760 175 760 216 C760 275 703 299 665 302 Z" fill="#f5f4e9" class="ink"/>
+    <!-- wing -->
+    <path d="M520 351 C569 319 650 328 679 385 C698 421 675 467 636 471 C586 477 527 434 520 351Z" fill="#b9dce0" class="ink"/>
+    <path d="M546 369 C582 357 627 372 653 405 M548 400 C584 391 618 405 642 432" class="thin" fill="none" stroke="#6ea7b2"/>
+
+    <!-- face and beak -->
+    <circle cx="690" cy="211" r="10" fill="#173a4a"/>
+    <circle cx="694" cy="207" r="3" fill="#fff"/>
+    <path d="M674 231 C756 218 841 243 867 294 C883 326 859 376 817 384 L700 371 C669 367 652 331 664 298 Z" fill="url(#beak)" class="ink"/>
+    <path d="M668 299 C736 287 819 293 867 294 C883 326 859 376 817 384 L700 371 C669 367 652 331 664 298Z" fill="#f4a94a" opacity=".65"/>
+    <path d="M679 307 C725 323 784 327 850 308" class="thin" fill="none" stroke="#b66d31"/>
+    <path d="M744 365 C773 385 804 382 820 373" class="thin" fill="none" stroke="#b66d31"/>
+    <!-- smile -->
+    <path d="M702 254 Q720 269 740 252" class="thin" fill="none"/>
+  </g>
+
+  <!-- legs pedaling -->
+  <g class="ink" fill="none" stroke="#f1a63f" stroke-width="24">
+    <path d="M565 448 L602 533 L672 570"/>
+    <path d="M626 449 L658 512 L600 573"/>
+  </g>
+  <g class="ink" fill="none" stroke="#f1a63f" stroke-width="16">
+    <path d="M662 570 l48 5"/>
+    <path d="M600 573 l-47 7"/>
+  </g>
+
+  <!-- little cap -->
+  <path d="M600 176 C630 133 707 132 748 177 L724 191 C690 167 647 169 613 193Z" fill="#ef785f" class="ink"/>
+  <path d="M606 183 C573 183 553 196 548 214 C582 220 609 213 630 195Z" fill="#ef785f" class="ink"/>
+
+  <!-- beach details -->
+  <g fill="#e6b85e" opacity=".9">
+    <circle cx="936" cy="684" r="7"/><circle cx="968" cy="697" r="5"/><circle cx="1005" cy="677" r="8"/>
+    <circle cx="214" cy="729" r="6"/><circle cx="259" cy="709" r="9"/>
+  </g>
+  <text x="600" y="761" text-anchor="middle" font-family="Verdana, sans-serif" font-size="25" font-weight="bold" fill="#476572" letter-spacing="4">COASTAL CRUISER</text>
+</svg>
