@@ -7,6 +7,7 @@
 - Данные: enwik8, сплит 90/5/5, см. `data/README.md`.
 - B-classic — modified KN, побайтовая 8-грамма: **1.779 bpb** на valid. B-NN — побайтовый трансформер (JAX).
 - Первый пилот — тернарные веса (`docs/03`, §8). На малом N c ≈ 0.33; против fp + int4-PTQ тернарность **проигрывает** по размеру (k ≈ 0.9).
+- Второй пилот — гибрид «n-граммная таблица + НС, обучаемая как остаток» (`docs/04`, §9): 1.704 bpb против 1.751 у KN-8 (−2.7%), стоимость ×77. Порог гипотезы (−0.1) не достигнут.
 
 | Документ | Содержание |
 |---|---|
@@ -14,6 +15,7 @@
 | [docs/01_cost_model.md](docs/01_cost_model.md) | Модель затрат обучения и инференса, где теряются ресурсы, нижние границы |
 | [docs/02_success_criteria.md](docs/02_success_criteria.md) | Метрики, протокол честного сравнения, пороги перехода между фазами |
 | [docs/03_ternary_math.md](docs/03_ternary_math.md) | Тернарные веса: вывод до эксперимента и результат пилота |
+| [docs/04_ngram_memory_math.md](docs/04_ngram_memory_math.md) | Гибрид «счётная память + НС»: вывод до эксперимента и результат пилота |
 | [docs/decisions.md](docs/decisions.md) | Журнал решений |
 
 ## Инструменты (код только для проверки математики)
@@ -23,7 +25,8 @@
 | `tools/roofline_probe.py` | Замер пиковой производительности и пропускной способности памяти текущей машины | **измерено** → `results/roofline_sandbox.json` |
 | `tools/cost_model.py` | Калькулятор формул модели затрат | **оценка** → `results/cost_model_tables.md` |
 | `tools/ngram_kn.py` | B-classic: modified Kneser–Ney, побайтовые n-граммы, точные ключи | **измерено** → `results/runs/bclassic_kn.jsonl` |
-| `tools/lm.py` | B-NN и тернарный трансформер (JAX, CPU), bpb со скользящим окном | **измерено** → `results/runs/*.jsonl` |
+| `tools/lm.py` | B-NN, тернарный трансформер и гибрид R (`--ngram K`), JAX/CPU, bpb со скользящим окном | **измерено** → `results/runs/*.jsonl` |
+| `tools/mix_eval.py` | Модель M: интерполяция B-NN и mKN, λ подбирается на отдельном куске valid | **измерено** → `results/runs/pilot_ngram.jsonl` |
 | `tools/ptq_eval.py` | Сильный базлайн по размеру: PTQ int8/int4/int3 с группами по 32 | **измерено** → `results/runs/ptq.jsonl` |
 | `tools/analyze_ternary_pilot.py` | Расчёт c и k_size по `docs/03` §6 | → `results/ternary_pilot_table.md` |
 
