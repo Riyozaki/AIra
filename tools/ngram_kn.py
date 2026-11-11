@@ -53,12 +53,17 @@ class Order:
         ctx = keys >> np.uint64(8)
         self.ctx, first = np.unique(ctx, return_index=True)  # keys sorted -> ctx sorted
         bounds = np.concatenate((first, [len(keys)]))
+        self.bounds = bounds
         cs = np.concatenate(([0], np.cumsum(cnt)))
         self.ctx_total = cs[bounds[1:]] - cs[bounds[:-1]]
         def nk(mask):
             m = np.concatenate(([0], np.cumsum(mask.astype(np.int64))))
             return m[bounds[1:]] - m[bounds[:-1]]
         self.n1, self.n2, self.n3 = nk(cnt == 1), nk(cnt == 2), nk(cnt >= 3)
+        # slim memory (all values < 2^31 for enwik8-size data)
+        self.cnt = self.cnt.astype(np.int32); self.ctx_total = self.ctx_total.astype(np.int32)
+        self.n1, self.n2, self.n3 = (x.astype(np.int32) for x in (self.n1, self.n2, self.n3))
+        self.bounds = self.bounds.astype(np.int32)
 
     def lookup(self, qkeys):
         """returns c(h,w), c(h), gamma-numerator for each query key (0 where unseen)"""
@@ -90,6 +95,38 @@ def build(train, K):
         orders[k] = Order(uk, uc, k)
         prev_unique = uk
     return orders
+
+
+def dense(orders, ctx):
+    """Full next-byte distributions. ctx: (M, K) uint8, oldest byte first (K = len(orders)-1).
+    Returns (M, 256) float64 probabilities (rows sum to 1)."""
+    K = len(orders) - 1
+    M = ctx.shape[0]
+    p = np.full((M, 256), 1.0 / 256)
+    for k in range(0, K + 1):
+        o = orders[k]
+        q = np.zeros(M, dtype=np.uint64)  # context key: newest byte lowest
+        for j in range(1, k + 1):
+            q |= ctx[:, K - j].astype(np.uint64) << np.uint64(8 * (j - 1))
+        jj = np.minimum(np.searchsorted(o.ctx, q), len(o.ctx) - 1)
+        hit = o.ctx[jj] == q
+        rows = np.flatnonzero(hit)
+        if len(rows) == 0:
+            continue
+        j = jj[rows]
+        tot = o.ctx_total[j].astype(np.float64)
+        D = o.D
+        gamma = (D[1] * o.n1[j] + D[2] * o.n2[j] + D[3] * o.n3[j]) / tot
+        st, ln = o.bounds[j], o.bounds[j + 1] - o.bounds[j]
+        rr = np.repeat(np.arange(len(rows)), ln)
+        off = np.arange(ln.sum()) - np.repeat(np.cumsum(ln) - ln, ln)
+        idx = st[rr] + off
+        c = o.cnt[idx].astype(np.int64)
+        val = np.maximum(c - D[np.minimum(c, 3)], 0) / tot[rr]
+        w = (o.keys[idx] & np.uint64(255)).astype(np.int64)
+        add = np.bincount(rr * 256 + w, weights=val, minlength=len(rows) * 256).reshape(len(rows), 256)
+        p[rows] = gamma[:, None] * p[rows] + add
+    return p
 
 
 def score(orders, buf, start):

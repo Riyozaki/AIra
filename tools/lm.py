@@ -14,6 +14,9 @@ import argparse, json, math, os, time
 import numpy as np
 import jax, jax.numpy as jnp
 import optax
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
+import ngram_kn as ng
 
 RAW = os.path.join(os.path.dirname(__file__), "..", "data", "raw")
 
@@ -70,7 +73,7 @@ def init(key, d, L, heads, V=256):
     return p
 
 
-def forward(p, x, heads, quant):
+def forward(p, x, heads, quant, lp=None):
     B, T = x.shape
     h = p["emb"][x]
     d = h.shape[-1]
@@ -86,11 +89,12 @@ def forward(p, x, heads, quant):
         h = h + linear(o, b["o"], quant)
         m = rmsnorm(h, b["g2"])
         h = h + linear(jnp.square(jax.nn.relu(linear(m, b["up"], quant))), b["down"], quant)
-    return rmsnorm(h, p["gf"]) @ p["head"]
+    out = rmsnorm(h, p["gf"]) @ p["head"]
+    return out if lp is None else out + lp  # residual over n-gram log-probs (docs/04 model R)
 
 
-def nll(p, x, y, heads, quant):  # mean nats over all positions
-    lg = forward(p, x, heads, quant)
+def nll(p, x, y, heads, quant, lp=None):  # mean nats over all positions
+    lg = forward(p, x, heads, quant, lp)
     return jnp.mean(optax.softmax_cross_entropy_with_integer_labels(lg, y))
 
 
@@ -102,20 +106,32 @@ def count(p):
 
 
 # ---------------- data ----------------
-def batches(data, B, T, rng):
+def ng_logp(full, orders, starts, T):
+    """log p_ng for windows full[s:s+T] -> (len(starts), T, 256) float32 (context = K bytes ending at each pos)"""
+    K = len(orders) - 1
+    ctx = np.concatenate([np.lib.stride_tricks.sliding_window_view(np.asarray(full[s - K + 1:s + T]), K)
+                          for s in starts])
+    return np.log(ng.dense(orders, ctx)).astype(np.float32).reshape(len(starts), T, 256)
+
+
+def batches(data, B, T, rng, lo=0, hi=None, orders=None):
+    hi = len(data) if hi is None else hi
     while True:
-        ix = rng.integers(0, len(data) - T - 1, B)
+        ix = rng.integers(lo, hi - T - 1, B)
         xy = np.stack([data[i:i + T + 1] for i in ix]).astype(np.int32)
-        yield xy[:, :-1], xy[:, 1:]
+        if orders is None:
+            yield xy[:, :-1], xy[:, 1:], None
+        else:
+            yield xy[:, :-1], xy[:, 1:], ng_logp(data, orders, ix, T)
 
 
-def evaluate(p, data, T, heads, quant, B=32):
-    """sliding-window bpb on `data` (1-D uint8)."""
+def evaluate(p, data, T, heads, quant, B=32, lpfn=None):
+    """sliding-window bpb on `data` (1-D uint8). lpfn(starts)->(B,T,256) n-gram log-probs (relative starts)."""
     S = T // 2
 
     @jax.jit
-    def tok_nll(p, x, y):
-        lg = forward(p, x, heads, quant)
+    def tok_nll(p, x, y, lp):
+        lg = forward(p, x, heads, quant, lp)
         return optax.softmax_cross_entropy_with_integer_labels(lg, y)
 
     starts = list(range(0, len(data) - T - 1 + 1, S))
@@ -125,7 +141,8 @@ def evaluate(p, data, T, heads, quant, B=32):
         pad = B - len(st)
         st_p = st + [st[-1]] * pad
         xy = np.stack([data[s:s + T + 1] for s in st_p]).astype(np.int32)
-        l = np.asarray(tok_nll(p, xy[:, :-1], xy[:, 1:]))[: len(st)]
+        lp = None if lpfn is None else lpfn(st_p)
+        l = np.asarray(tok_nll(p, xy[:, :-1], xy[:, 1:], lp))[: len(st)]
         for j, s in enumerate(st):
             seg = l[j] if s == 0 else l[j, S:]
             tot += float(seg.sum()); n += seg.size
@@ -154,6 +171,8 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--probe", action="store_true", help="only measure step time")
     ap.add_argument("--save", default=None, help="save final params (.npz) for PTQ eval")
+    ap.add_argument("--ngram", type=int, default=0, help="K>0: residual hybrid over mKN (docs/04 model R)")
+    ap.add_argument("--ng-bytes", type=int, default=80_000_000, help="table built on train[:ng_bytes]; NN trained on train[ng_bytes:90M]")
     a = ap.parse_args()
 
     full = np.memmap(os.path.join(RAW, "enwik8"), dtype=np.uint8, mode="r")
@@ -163,6 +182,15 @@ def main():
 
     p = init(jax.random.PRNGKey(a.seed), a.d, a.layers, a.heads)
     emb, lin, other = count(p)
+    orders, tab_s, lo, lpfn, n_entries = None, 0.0, 0, None, 0
+    if a.ngram > 0:
+        t0 = time.time()
+        orders = ng.build(np.asarray(full[:a.ng_bytes]), a.ngram)
+        tab_s = time.time() - t0
+        n_entries = int(sum(len(o.keys) for o in orders))
+        lo = a.ng_bytes  # cross-fitting (docs/04 §4)
+        p["head"] = jnp.zeros_like(p["head"])  # f == 0 at init -> p = p_ng exactly
+        lpfn = lambda st: ng_logp(full, orders, [off + s for s in st], a.T)
     if a.steps <= 0 and not a.probe:
         assert a.minutes > 0
     total_steps = a.steps if a.steps > 0 else 10**9
@@ -175,19 +203,19 @@ def main():
     st = opt.init(p)
 
     @jax.jit
-    def step(p, st, x, y):
-        l, g = jax.value_and_grad(nll)(p, x, y, a.heads, a.quant)
+    def step(p, st, x, y, lp):
+        l, g = jax.value_and_grad(nll)(p, x, y, a.heads, a.quant, lp)
         u, st = opt.update(g, st, p)
         return optax.apply_updates(p, u), st, l
 
     rng = np.random.default_rng(a.seed)
-    it = batches(train, a.B, a.T, rng)
-    x, y = next(it)
-    t0 = time.time(); p, st, l = step(p, st, x, y); l.block_until_ready(); tcomp = time.time() - t0
+    it = batches(train, a.B, a.T, rng, lo=lo, orders=orders)
+    x, y, lp = next(it)
+    t0 = time.time(); p, st, l = step(p, st, x, y, lp); l.block_until_ready(); tcomp = time.time() - t0
     if a.probe:
         t0 = time.time()
         for _ in range(5):
-            x, y = next(it); p, st, l = step(p, st, x, y)
+            x, y, lp = next(it); p, st, l = step(p, st, x, y, lp)
         l.block_until_ready()
         dt = (time.time() - t0) / 5
         print(json.dumps(dict(d=a.d, L=a.layers, quant=a.quant, N_emb=emb, N_lin=lin,
@@ -197,16 +225,18 @@ def main():
     while s < total_steps:
         if a.steps <= 0 and time.time() - t0 > a.minutes * 60:
             break
-        x, y = next(it); p, st, l = step(p, st, x, y); s += 1
+        x, y, lp = next(it); p, st, l = step(p, st, x, y, lp); s += 1
         if s % 100 == 0:
             hist.append((s, round(float(l) / math.log(2), 4)))
     train_s = time.time() - t0
     te = time.time()
-    bpb, n = evaluate(p, evdata, a.T, a.heads, a.quant)
+    bpb, n = evaluate(p, evdata, a.T, a.heads, a.quant, lpfn=lpfn)
     res = dict(tag=a.tag, model="transformer", quant=a.quant, d=a.d, L=a.layers, heads=a.heads, T=a.T, B=a.B,
                N_emb=emb, N_lin=lin, N_other=other, lr=a.lr, wd=a.wd, seed=a.seed, steps=s,
                tokens=s * a.B * a.T, train_s=round(train_s, 1), eval_s=round(time.time() - te, 1),
-               split=a.split, eval_bytes=n, bpb=round(bpb, 5), train_curve=hist[-5:],
+               split=a.split, eval_bytes=n, bpb=round(bpb, 5), ngram_K=a.ngram,
+               ng_bytes=a.ng_bytes if a.ngram else 0, table_s=round(tab_s, 1), table_entries=n_entries,
+               train_lo=lo, train_curve=hist[-5:],
                jax=jax.__version__)
     print(json.dumps(res))
     if a.save:
