@@ -1,0 +1,16 @@
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d128_s0.npz", "d": 128, "L": 4, "ptq_bits": 32, "bits_per_lin_weight": 16, "bpb": 2.3161, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d128_s0.npz", "d": 128, "L": 4, "ptq_bits": 8, "bits_per_lin_weight": 8.5, "bpb": 2.31606, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d128_s0.npz", "d": 128, "L": 4, "ptq_bits": 4, "bits_per_lin_weight": 4.5, "bpb": 2.32998, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d128_s0.npz", "d": 128, "L": 4, "ptq_bits": 3, "bits_per_lin_weight": 3.5, "bpb": 2.3981, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d192_s0.npz", "d": 192, "L": 4, "ptq_bits": 32, "bits_per_lin_weight": 16, "bpb": 2.23347, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d192_s0.npz", "d": 192, "L": 4, "ptq_bits": 8, "bits_per_lin_weight": 8.5, "bpb": 2.23347, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d192_s0.npz", "d": 192, "L": 4, "ptq_bits": 4, "bits_per_lin_weight": 4.5, "bpb": 2.23862, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d192_s0.npz", "d": 192, "L": 4, "ptq_bits": 3, "bits_per_lin_weight": 3.5, "bpb": 2.267, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d64_s0.npz", "d": 64, "L": 4, "ptq_bits": 32, "bits_per_lin_weight": 16, "bpb": 2.5296, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d64_s0.npz", "d": 64, "L": 4, "ptq_bits": 8, "bits_per_lin_weight": 8.5, "bpb": 2.52967, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d64_s0.npz", "d": 64, "L": 4, "ptq_bits": 4, "bits_per_lin_weight": 4.5, "bpb": 2.55809, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d64_s0.npz", "d": 64, "L": 4, "ptq_bits": 3, "bits_per_lin_weight": 3.5, "bpb": 2.72186, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d96_s0.npz", "d": 96, "L": 4, "ptq_bits": 32, "bits_per_lin_weight": 16, "bpb": 2.36633, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d96_s0.npz", "d": 96, "L": 4, "ptq_bits": 8, "bits_per_lin_weight": 8.5, "bpb": 2.36654, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d96_s0.npz", "d": 96, "L": 4, "ptq_bits": 4, "bits_per_lin_weight": 4.5, "bpb": 2.38808, "eval_bytes": 499968}
+{"tag": "pilot_ptq", "ckpt": "results/ckpt/fp_d96_s0.npz", "d": 96, "L": 4, "ptq_bits": 3, "bits_per_lin_weight": 3.5, "bpb": 2.47434, "eval_bytes": 499968}

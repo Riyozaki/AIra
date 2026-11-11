@@ -2,3 +2,4 @@
 __pycache__/
 data/raw/
 *.tgz
+results/ckpt/

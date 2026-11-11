@@ -2,13 +2,18 @@
 
 Цель: модель, алгоритм обучения и вычислительная среда, которые при сопоставимом качестве дают ×10–100 по скорости или стоимости обучения и инференса и по размеру модели. Правила проекта: сначала математика, честные измерения, отрицательный результат — тоже результат.
 
-## Текущий статус: фаза 1, шаг 1 (ресерч и модель затрат). Ждём согласования руководителя.
+## Текущий статус: фаза 1, практическая часть начата (2026-11-11)
+
+- Данные: enwik8, сплит 90/5/5, см. `data/README.md`.
+- B-classic — modified KN, побайтовая 8-грамма: **1.779 bpb** на valid. B-NN — побайтовый трансформер (JAX).
+- Первый пилот — тернарные веса (`docs/03`, §8). На малом N c ≈ 0.33; против fp + int4-PTQ тернарность **проигрывает** по размеру (k ≈ 0.9).
 
 | Документ | Содержание |
 |---|---|
 | [docs/00_research_review.md](docs/00_research_review.md) | Обзор актуальных подходов с источниками, оценкой надёжности и вердиктами |
 | [docs/01_cost_model.md](docs/01_cost_model.md) | Модель затрат обучения и инференса, где теряются ресурсы, нижние границы |
 | [docs/02_success_criteria.md](docs/02_success_criteria.md) | Метрики, протокол честного сравнения, пороги перехода между фазами |
+| [docs/03_ternary_math.md](docs/03_ternary_math.md) | Тернарные веса: вывод до эксперимента и результат пилота |
 | [docs/decisions.md](docs/decisions.md) | Журнал решений |
 
 ## Инструменты (код только для проверки математики)
@@ -17,5 +22,9 @@
 |---|---|---|
 | `tools/roofline_probe.py` | Замер пиковой производительности и пропускной способности памяти текущей машины | **измерено** → `results/roofline_sandbox.json` |
 | `tools/cost_model.py` | Калькулятор формул модели затрат | **оценка** → `results/cost_model_tables.md` |
+| `tools/ngram_kn.py` | B-classic: modified Kneser–Ney, побайтовые n-граммы, точные ключи | **измерено** → `results/runs/bclassic_kn.jsonl` |
+| `tools/lm.py` | B-NN и тернарный трансформер (JAX, CPU), bpb со скользящим окном | **измерено** → `results/runs/*.jsonl` |
+| `tools/ptq_eval.py` | Сильный базлайн по размеру: PTQ int8/int4/int3 с группами по 32 | **измерено** → `results/runs/ptq.jsonl` |
+| `tools/analyze_ternary_pilot.py` | Расчёт c и k_size по `docs/03` §6 | → `results/ternary_pilot_table.md` |
 
-Запуск: `python -m venv .venv && .venv/bin/pip install numpy && .venv/bin/python tools/roofline_probe.py`.
+Окружение: `python3 -m venv .venv && .venv/bin/pip install numpy "jax[cpu]==0.10.2" optax==0.2.8`.
